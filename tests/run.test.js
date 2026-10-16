@@ -1,21 +1,16 @@
-for (const f of ['norms','sections','fem','model','loads','checks','support','analysis']) require('../js/'+f+'.js');
+for (const f of ['norms','sections','fem','model','loads','checks','welds','support','concrete','shell','analysis']) require('../js/'+f+'.js');
 const pr = SC.model.defaultProject();
 const t=Date.now(); const R = SC.analysis.run(pr);
 if(!R.ok){console.log(R);process.exit(1);}
-console.log('time', Date.now()-t, 'ms; nodes', R.P.nn, 'elems', R.P.els.length, 'combos', R.solved.length);
-console.log('T1', R.T1.toFixed(3), 'table', R.clim.ChTable, 'q0', R.clim.q0.toFixed(1), 'gfmW', R.clim.gfmW, 'gfmS', R.clim.gfmS);
-console.log('modes', R.modalG.modes.map(m=>m.T.toFixed(3)).join(' '));
-console.log('alphaCr', R.alphaCr && R.alphaCr.toFixed(2), 'uMax mm', (R.uMax*1000).toFixed(1), 'lim', (R.uLim*1000).toFixed(1));
-console.log('eqMax', R.eqMax);
-const top = R.memberRes.slice().sort((a,b)=>b.best.u-a.best.u).slice(0,8);
-for (const m of top) console.log(m.e.id, m.e.group, m.e.sec.name, 'U', m.best.u.toFixed(3), 'dbn', m.best.chk.dbn.max.toFixed(3), 'en', m.best.chk.en.max.toFixed(3), m.best.combo, 'N', (m.best.f.N/1e3).toFixed(2), 'My', (m.best.f.My/1e3).toFixed(2),'Mz', (m.best.f.Mz/1e3).toFixed(2));
-for (const s of R.supportRes) { const b=s.best.b; console.log('sup', s.node.id, 'U', s.best.u.toFixed(3), s.best.combo, 'Tmax kN', (b.Tmax/1e3).toFixed(1), 'bearing', b.bearing.toFixed(2), 'anchorSteel', b.anchorSteel.toFixed(2), 'plateT', b.plateT.toFixed(2), 'weld', b.weld.toFixed(2), 'cone', b.concrete.cone.toFixed(2), 'pull', b.concrete.pullout.toFixed(2), 'edge', (b.concrete.edge||0).toFixed(2)); }
-const F=R.found; console.log('R', F.Rsoil, 'sls', F.govSls.cb.name, F.govSls.chk.max.toFixed(3), 'pmax', (F.govSls.chk.p.pmax/1e3).toFixed(1), 'pmean', (F.govSls.chk.p.pmean/1e3).toFixed(1), 'contact', F.govSls.chk.p.contactFrac.toFixed(2));
-console.log('uls', F.govUls.cb.name, F.govUls.chk.max.toFixed(3), 'overt', F.govUls.chk.overturn.toFixed(3), 'slide', F.govUls.chk.slide.toFixed(3));
-console.log('reinf', JSON.stringify(F.reinf.pick), 'punch', F.reinf.punching.toFixed(3), 'Mx', (F.reinf.Mx/1e3).toFixed(1));
-if (R.seis) { console.log('seis mass', R.seis.totalMass.toFixed(0), 'meff', R.seis.sumMeff.map(v=>v.toFixed(2)).join(' ')); for (const r of R.seis.res) console.log(r.dir, r.modes.slice(0,3).map(m=>`T${m.mode}=${m.T.toFixed(3)} β=${m.beta.toFixed(2)} V=${(m.base/1e3).toFixed(2)}kN meff=${m.meff.toFixed(2)}`).join(' | ')); }
-console.log('spec tube', R.spec.tubeMass.toFixed(0), 'sheet', R.spec.sheetMass.toFixed(0), 'total cost', R.spec.total.toFixed(0));
-const W0 = R.cases.W[0]; console.log('W0 parts', W0.info.parts.map(p=>`${p.name}: A=${p.A.toFixed(2)} F=${(p.F/1e3).toFixed(2)}kN z=${p.zcp.toFixed(2)}`).join('; '));
-console.log('G frame mass', R.cases.G.info.frameMass.toFixed(0), 'shell', R.cases.G.info.shellMass.toFixed(0));
+console.log('time', Date.now()-t, 'combos', R.solved.length, 'T1', R.T1.toFixed(3));
+console.log('flex', JSON.stringify(R.flexLog.map(f=>({it:f.it,ch:f.change.toFixed(3),k:f.k[0]&&(f.k[0].kx/1e3).toFixed(0)}))));
 for (const w of R.warn) console.log(w.level, w.msg);
-console.log('status', R.status);
+console.log('welds', R.welds.length, 'max', Math.max(...R.welds.map(w=>w.u)).toFixed(3));
+const s=R.supportRes[0].best; console.log('base U', s.u.toFixed(3), s.combo, 'cls', s.cls, s.ratio.toFixed(1), 'washer', s.b.washer.max.toFixed(3), 'conc', JSON.stringify({cone:s.b.concrete.cone.toFixed(3), split:(s.b.concrete.split||0).toFixed(3), edge:s.b.concrete.edge.toFixed(3)}));
+const F=R.found; console.log('slab', F.slab.bx.pick, F.slab.by.pick, 'punch', F.slab.punching.toFixed(3), 'shear', F.slab.shearX.toFixed(3), 'crack', F.slab.crack.toFixed(2), 'sigS', F.slab.sigS.toFixed(1));
+console.log('settle mm', (F.settle.s*1000).toFixed(1), 'Hc', F.settle.Hc.toFixed(2), 'tilt', F.settle.tilt.toExponential(2), 'p0', F.settle.p0.toFixed(1));
+console.log('ped', F.ped.n, F.ped.dia, JSON.stringify(F.ped.hoop));
+console.log('rebar total', F.rebar.total.toFixed(1)); console.log('shell', R.shellRes.map(x=>`${x.part}: s=${x.s.toFixed(3)} rib ${x.rib.h}x${x.rib.t} m=${x.ribMass.toFixed(1)} u=${x.u.toFixed(2)}`).join(' | '));
+console.log('spec rows', R.spec.rows.length, 'cost', R.spec.total.toFixed(0));
+if (!(R.welds.length && R.found.slab && R.found.settle && R.spec.rows.length > 10)) process.exit(1);
+console.log('combos ids', R.combos.slice(0,8).map(c=>c.id).join(','));

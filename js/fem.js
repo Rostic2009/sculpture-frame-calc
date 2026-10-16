@@ -185,6 +185,18 @@
         for (let a = 0; a < 3; a++) fg[el.dofs[J * 3 + a]] += g[a];
       }
     }
+    // температурна (початкова) деформація ε0 = α·ΔT: еквівалентні вузлові сили EA·ε0 у локальних осях
+    for (const th of load.therm || []) {
+      const el = P.els[th.elem];
+      const E = (el.src.mat && el.src.mat.E) || SC.norms.E;
+      const P0 = E * el.src.sec.A * th.eps;
+      const f = new Array(12).fill(0); f[0] = -P0; f[6] = P0;
+      const prev = fe.get(th.elem); if (prev) for (let i = 0; i < 12; i++) prev[i] += f[i]; else fe.set(th.elem, f);
+      for (let J = 0; J < 4; J++) {
+        const g = rotVT(el.R, [f[J * 3], f[J * 3 + 1], f[J * 3 + 2]]);
+        for (let a = 0; a < 3; a++) fg[el.dofs[J * 3 + a]] += g[a];
+      }
+    }
     return { fg, fe };
   }
 

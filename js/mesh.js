@@ -59,7 +59,7 @@
     // зсув: основа на z = 0, центр у плані — у початку координат (якщо не задано)
     let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
     for (let i = 0; i < n * 3; i++) for (let a = 0; a < 3; a++) { mn[a] = Math.min(mn[a], T[i * 3 + a]); mx[a] = Math.max(mx[a], T[i * 3 + a]); }
-    const off = opts.offset || [-(mn[0] + mx[0]) / 2, -(mn[1] + mx[1]) / 2, -mn[2]];
+    const off = opts.noRecenter ? [0, 0, 0] : (opts.offset || [-(mn[0] + mx[0]) / 2, -(mn[1] + mx[1]) / 2, -mn[2]]);
     for (let i = 0; i < n * 3; i++) for (let a = 0; a < 3; a++) T[i * 3 + a] += off[a];
     for (let a = 0; a < 3; a++) { mn[a] += off[a]; mx[a] += off[a]; }
     let Aall = 0; const c = [0, 0, 0];

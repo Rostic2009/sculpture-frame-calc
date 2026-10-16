@@ -19,13 +19,23 @@
         snowMode: 'city', snowDistrict: 'IV', S0: 1550, snowRegion: 'plain', Ce: 1.0,
         Tlife: 100, cc: 'CC2', gammaN: 1.0, hPed: 0.6,
         seismic: { on: true, intensity: 6, soil: 'II', k1: 1.0, k2: 1.0, kgr: 1.0, kpsi: 1.5, vertical: true, nModes: 12 },
+        ice: { on: true, b: 19, WB: 160, gfm: 1.0 },
+        temp: { on: true, dTplus: 35, dTminus: -40, gf: 1.1 },
+        env: { corrosivity: 'C3', protection: 'Ґрунтування + фарбування (ДСТУ ISO 12944, C3-H)', approach: 'none', corrAllow: 0.5, inspection: 'раз на рік', drainage: true },
+        aero: { mode: 'forces', source: 'Попередня оцінка (C_F за аналогами)', confirmed: false },
       },
+      shell: { mode: 'non-structural', ribStep: 0, ribStepMax: 600, ribSpan: 800, cLocal: 1.5, wLim: 100 },
+      loadsUser: [
+        { name: 'Обслуговування: драбина/монтажник біля голови', kind: 'service', x: 0.1, y: 0, z: 6.0, Fx: 0, Fy: 0, Fz: -1.0 },
+      ],
+      supports: { confirmed: false, note: 'Опирання лише через каркас-ядро на фундамент; плащ не спирається на ґрунт (зазор 30 мм)', existingFoundation: false, allowDisp: 10 },
       frame: {
         type: 'core4', a: 0.6, b: 0.6, aTop: 0.4, bTop: 0.4,
         levels: [0, 1.5, 3.0, 4.5, 6.0], bracing: 'X',
         secPost: '□100×5', secRing: '□60×4', secBrace: '□50×3',
         steel: 'С245', support: 'fixed', exposed: false, CfFrame: 2.0, gammaC: 1.0,
         anchorPostsToPlate: 'each',
+        extraNodes: [], extraElems: [],
       },
       parts: [
         { name: 'Тулуб і плащ', kind: 'dist', x: 0, y: 0, z: 3.0, z1: 0.3, z2: 6.0, shellArea: 38, tShell: 2, rhoShell: 7850, extraMass: 0, Ax: 9.5, Ay: 6.0, Cf: 1.2, Ah: 1.2, mu: 1.0, sec: '' },
@@ -35,17 +45,31 @@
       ],
       base: {
         plateB: 300, plateL: 300, tp: 20, nAnchor: 4, edge: 50, d: 20, grade: '5.6', hef: 350, dh: 45,
-        lb: 200, concrete: 'C25/30', cracked: true, shear: 'anchors', cf: 0.2, alphaBearing: 1.5, weldLeg: 6,
+        lb: 200, concrete: 'C25/30', cracked: true, shear: 'anchors', cf: 0.2, alphaBearing: 'auto', weldLeg: 6,
+        type: 'bolts', nRibs: 0, hr: 120, tr: 10, ribWeldLeg: 6, tw: 10, flex: 'iter',
+        lugB: 100, lugH: 80, lugT: 12, splitReinf: true,
+        anchorReinf: { on: false, ds: 12, nPerAnchor: 2, hooked: true, dist: 100, cover: 50 },
       },
       found: {
         B: 2.8, L: 2.8, h: 0.6, depth: 1.2, pedH: 0.6, pedB: 1.4, pedL: 1.4, soilMode: 'R', R: 200,
         phi: 24, cII: 5, gammaSoil: 18, gammaC1: 1.2, gammaC2: 1.0, kfactor: 1.1, frictionMu: 0.3,
         concrete: 'C25/30', rebar: 'A500C', cover: 50, rhoC: 2500, rhoSoil: 1800, minContact: 0.75, overturnSF: 1.5,
+        layers: [
+          { name: 'Насипний ґрунт', h: 0.8, gamma: 17, E: 5, nu: 0.35, phi: 15, c: 5 },
+          { name: 'Суглинок тугопластичний', h: 3.5, gamma: 19.5, E: 16, nu: 0.35, phi: 22, c: 22 },
+          { name: 'Пісок середньої крупності', h: 8, gamma: 18.5, E: 30, nu: 0.3, phi: 35, c: 1 },
+        ],
+        gwl: 4.5, sLim: 0.1, tiltLim: 0.004, existing: false,
       },
-      design: { meshUnit: '0.001', meshUp: 'z', target: 0.9, tMin: 3, dirStep: 15, second: true, method: 'A', defLimit: 150, norm: 'both', gammaM0: 1.0, gammaM1: 1.0, curve: 'c', waste: 7, sheetWaste: 15 },
+      design: { bMin: 40, bMax: 200, lockPost: false, electrode: 'Е42 / Э42 (ручне)', weldLegFrame: 'auto', weldLegBrace: 'auto', meshUnit: '0.001', meshUp: 'z', target: 0.9, tMin: 3, dirStep: 15, second: true, method: 'A', defLimit: 150, norm: 'both', gammaM0: 1.0, gammaM1: 1.0, curve: 'c', waste: 7, sheetWaste: 15 },
       prices: { tube: 62, sheet: 58, plate: 55, anchor: 180, concrete: 3900, rebar: 38, fabrication: 0, transport: 0, install: 0 },
       overrides: {},
       mesh: [],
+      images: [],
+      vision: { parts: [], depthRatio: 0.6, yCenter: 0, checklist: {} },
+      status: { value: 'Чернетка', log: [] },
+      journal: [],
+      role: 'Інженер-конструктор',
     };
   };
 
@@ -60,7 +84,16 @@
     const levels = [...new Set(fr.levels.map(Number))].filter(z => z >= 0).sort((a, b) => a - b);
     if (levels[0] !== 0) levels.unshift(0);
     const H = levels[levels.length - 1];
-    const sec = name => S.byName(name) || S.shs(100, 5);
+    // корозійний припуск: розрахунок на залишковий переріз (ТЗ 2.6.3) — товщина стінки зменшується на Δ
+    const env = (pr.site && pr.site.env) || {};
+    const dCorr = env.approach === 'residual' ? (env.corrAllow || 0) : 0;
+    const sec = name => {
+      const s0 = S.byName(name) || S.shs(100, 5);
+      if (!dCorr) return s0;
+      const r = S.shs(s0.bmm, Math.max(0.5, s0.tmm - dCorr), { ro: s0.ro * 1000 });
+      r.name = s0.name; r.mass = s0.mass; r.nominal = s0; r.tmmNom = s0.tmm; r.corr = dCorr;
+      return r;
+    };
     const posts = fr.type === 'single' ? 1 : fr.type === 'core3' ? 3 : 4;
     const plan = (t) => {
       const a = lerp(fr.a, fr.aTop != null ? fr.aTop : fr.a, t), b = lerp(fr.b, fr.bTop != null ? fr.bTop : fr.b, t);
@@ -98,6 +131,15 @@
     if (posts > 1) for (let li = 1; li < levels.length; li++) {
       const A = levelNodes[li].ids;
       for (let k = 0; k < posts; k++) add(A[k], A[(k + 1) % posts], sr, 'beam', 'Пояси (кільця)', { secName: fr.secRing });
+    }
+    // Додаткові вузли й стрижні (редактор каркаса, ТЗ 7.1: G = (V, E))
+    for (const xn of fr.extraNodes || []) {
+      if (!xn.id || nodes.some(n => n.id === xn.id)) continue;
+      nodes.push({ id: xn.id, x: +xn.x, y: +xn.y, z: +xn.z, sup: xn.sup === 'fixed' ? [1, 1, 1, 1, 1, 1] : xn.sup === 'pinned' ? [1, 1, 1, 0, 0, 0] : null, extra: true });
+    }
+    for (const xe of fr.extraElems || []) {
+      if (!nodes.some(n => n.id === xe.i) || !nodes.some(n => n.id === xe.j) || xe.i === xe.j) continue;
+      add(xe.i, xe.j, sec(xe.sec || '□60×4'), xe.type === 'truss' ? 'truss' : 'beam', xe.group || 'Додаткові елементи', { secName: xe.sec || '□60×4' });
     }
     // Частини скульптури
     const nodeById = new Map(nodes.map(n => [n.id, n]));

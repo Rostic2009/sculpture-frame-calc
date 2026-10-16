@@ -74,9 +74,11 @@
         g.beginPath(); g.moveTo(sg.a[0], sg.a[1]); g.lineTo(sg.b[0], sg.b[1]); g.stroke();
       }
       g.setLineDash([]);
+      // підписи вузлів
+      if (d.labels) { g.fillStyle = css('--muted'); g.font = '10px ' + css('--font-mono'); nodes.forEach((n, k) => { const q = P(disp(k)); g.fillText(n.id, q[0] + 4, q[1] - 4); }); }
       // опори
       nodes.forEach((n, k) => {
-        if (!n.sup) return; const p = P([n.x, n.y, n.z]);
+        if (!n.sup && !n.baseSpring) return; const p = P([n.x, n.y, n.z]);
         g.fillStyle = css('--fg'); g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(p[0] - 7, p[1] + 10); g.lineTo(p[0] + 7, p[1] + 10); g.closePath(); g.fill();
       });
       // частини

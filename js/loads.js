@@ -100,11 +100,12 @@
       (pr.parts || []).forEach((p, pi) => {
         const pa = mdl.partAttach.find(a => a.part === pi);
         const A = L.partArea(p, th);
+        const Cf = L.partCf(p, th);
         let Fp = 0, Mz = 0;
         pa.targets.forEach(t => {
           const zg = (p.kind === 'cant' ? p.z : t.z) + hPed;
           const qk = clim.qAt(zg).q / clim.gfmW; // характеристичний тиск з Ch
-          const F = qk * p.Cf * A * t.share;
+          const F = qk * Cf * A * t.share;
           Fp += F; Mz += F * zg;
           pushDistributed(W.nodal, t, [F * d[0], F * d[1], 0], pos, p.kind === 'cant' ? null : [p.x, p.y, t.c[2]]);
         });
@@ -123,7 +124,60 @@
       }
       cases.W.push(W);
     }
+    // Ожеледь I (ДБН В.1.2-2, р. 10): вага шару на поверхні i = b·k(z)·μ₂·ρ·g, Па
+    const ice = pr.site.ice || {};
+    if (ice.on && ice.b > 0) {
+      const I = { nodal: [], dist: [], info: { total: 0 } };
+      (pr.parts || []).forEach((p, pi) => {
+        const pa = mdl.partAttach.find(a => a.part === pi);
+        const kz = SC.norms.interp(SC.norms.iceK.z, SC.norms.iceK.k, p.z + hPed);
+        const w = ice.b / 1000 * kz * SC.norms.iceMu2 * SC.norms.iceRho * g;
+        const F = w * (p.shellArea || 0);
+        I.info.total += F;
+        pa.targets.forEach(t => pushDistributed(I.nodal, t, [0, 0, -F * t.share], pos));
+      });
+      cases.I = I;
+    }
+    // Температура T± (ДБН В.1.2-2, р. 11): початкова деформація ε₀ = α·ΔT у кожному елементі каркаса
+    const tmp = pr.site.temp || {};
+    if (tmp.on) {
+      cases.Tp = { nodal: [], dist: [], therm: mdl.elems.map((e, k) => ({ elem: k, eps: SC.norms.alphaT * (tmp.dTplus || 0) })) };
+      cases.Tm = { nodal: [], dist: [], therm: mdl.elems.map((e, k) => ({ elem: k, eps: SC.norms.alphaT * (tmp.dTminus || 0) })) };
+    }
+    // Навантаження користувача: обслуговування (Q), монтаж (M), аварійні (A) — у найближчий вузол
+    const userCase = kind => {
+      const c = { nodal: [], dist: [], items: [] };
+      (pr.loadsUser || []).filter(u => u.kind === kind).forEach(u => {
+        let best = null, bd = Infinity;
+        P.model.nodes.forEach(n => { const d = Math.hypot(n.x - u.x, n.y - u.y, n.z - u.z); if (d < bd) { bd = d; best = n; } });
+        if (!best) return;
+        const F = [u.Fx * 1000, u.Fy * 1000, u.Fz * 1000];
+        const r = [u.x - best.x, u.y - best.y, u.z - best.z];
+        const m = SC.fem.vec.cross(r, F);
+        c.nodal.push({ node: best.id, f: [F[0], F[1], F[2], m[0], m[1], m[2]] });
+        c.items.push({ name: u.name, node: best.id, dist: bd });
+      });
+      return c.nodal.length ? c : null;
+    };
+    cases.Q = userCase('service'); cases.M = userCase('erection'); cases.A = userCase('accidental');
     return cases;
+  };
+
+  /** Аеродинамічний коефіцієнт частини для напрямку θ: таблиця C_F(θ) зі звіту (якщо завантажено) або постійний C_F. */
+  L.partCf = function (p, theta) {
+    const t = p.cfTable;
+    if (t && t.length) {
+      const pts = t.slice().sort((a, b) => a.theta - b.theta);
+      const th = ((theta % 360) + 360) % 360;
+      for (let i = 0; i < pts.length; i++) {
+        const a = pts[i], b = pts[(i + 1) % pts.length];
+        const tb = i + 1 < pts.length ? b.theta : b.theta + 360;
+        const x = (i + 1 === pts.length && th < a.theta) ? th + 360 : th;
+        if (x >= a.theta && x <= tb) return a.Cf + (x - a.theta) / ((tb - a.theta) || 1) * (b.Cf - a.Cf);
+      }
+      return pts[0].Cf;
+    }
+    return p.Cf;
   };
 
   function pushDistributed(arr, t, Fv, pos, cOverride) {
@@ -135,11 +189,12 @@
 
   /** Лінійна комбінація завантажень: [{case, k}] → навантаження. */
   L.combine = function (terms) {
-    const out = { nodal: [], dist: [] };
+    const out = { nodal: [], dist: [], therm: [] };
     for (const { c, k } of terms) {
       if (!c || !k) continue;
-      for (const n of c.nodal) out.nodal.push({ node: n.node, f: n.f.map(v => v * k) });
-      for (const d of c.dist) out.dist.push({ elem: d.elem, w: d.w.map(v => v * k) });
+      for (const n of c.nodal || []) out.nodal.push({ node: n.node, f: n.f.map(v => v * k) });
+      for (const d of c.dist || []) out.dist.push({ elem: d.elem, w: d.w.map(v => v * k) });
+      for (const t of c.therm || []) out.therm.push({ elem: t.elem, eps: t.eps * k });
     }
     return out;
   };
