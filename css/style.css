@@ -201,3 +201,9 @@ textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 
 .navsel { display: none; }
 .navsel select { width: 100%; padding: 8px; border: 1px solid var(--line-strong); border-radius: var(--r); background: var(--surface); font-weight: 600; }
 @media (max-width: 860px) { .navsel { display: block; } .nav, .search { display: none !important; } }
+
+.dropzone { border: 2px dashed var(--line-strong); border-radius: var(--r); padding: 18px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; background: var(--surface-2); }
+.dropzone.over { border-color: var(--accent); }
+.dropzone p { margin: 0; }
+.file-input { font-size: 13px; max-width: 100%; }
+#app-root { min-height: 100%; }

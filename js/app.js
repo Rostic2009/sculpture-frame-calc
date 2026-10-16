@@ -236,7 +236,10 @@
   SC.ctx = ctx;
 
   function init() {
-    document.body.innerHTML = `<div class="progress" id="bar"></div>
+    // не перезаписуємо <body>: у вікні перегляду там лежать стилі сторінки — додаємо власний контейнер
+    let root = document.getElementById('app-root');
+    if (!root) { root = document.createElement('div'); root.id = 'app-root'; document.body.appendChild(root); }
+    root.innerHTML = `<div class="progress" id="bar"></div>
     <div class="app"><aside class="side"><div class="brand"><b>Каркас скульптури</b><small>розрахунок за ДБН · EN · у браузері, без API</small></div>
       <label class="search" for="navsearch"><span class="sr">Пошук розділу</span><input id="navsearch" type="search" placeholder="Пошук розділу…"></label>
       <label class="navsel" for="navsel"><span class="sr">Розділ</span><select id="navsel"></select></label>
