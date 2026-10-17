@@ -100,6 +100,8 @@
     // ДБН В.2.6-198, Зміна № 1
     ck('Сталь: λu стиснутих = 200', SC.checks.lambdaLimit('main'), 200, 1e-9, 'Зміна № 1, п. 13.4.1');
     ck('Сталь: λu розтягнутих = 400', SC.checks.lambdaLimit('tension'), 400, 1e-9, 'Зміна № 1, п. 13.4.1');
+    ck('Сталь: λ̄uw коробчастого перерізу при λ̄ = 2 = 1,4', SC.checks.lamUwBox(2), 1.4, 1e-9, 'табл. 8.3');
+    ck('Сталь: λ̄uw коробчастого перерізу не більше 1,6', SC.checks.lamUwBox(4), 1.6, 1e-9, 'табл. 8.3');
     return out;
   };
 })(typeof window !== 'undefined' ? (window.SC = window.SC || {}) : (global.SC = global.SC || {}));

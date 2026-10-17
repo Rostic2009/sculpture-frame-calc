@@ -44,6 +44,9 @@
     return { cls, ct, eps, Aeff, Weff, lim: [33 * eps, 38 * eps, 42 * eps] };
   };
 
+  /** Гранична умовна гнучкість стінки коробчастого перерізу при центральному стиску (ДБН В.2.6-198, табл. 8.3). */
+  C.lamUwBox = lb => lb <= 1 ? 1.2 : Math.min(1.6, 1.0 + 0.2 * lb);
+
   /**
    * Перевірка елемента для набору внутрішніх зусиль.
    * f: {N(розтяг +), Vy, Vz, T, My, Mz}, Н, Н·м; L_cr — розрахункова довжина, м; opt: {gammaC, gammaM0, gammaM1, curve, Cm}
@@ -71,6 +74,14 @@
     const amp = Nc > 0 ? 1 / Math.max(1e-6, 1 - Nc / NcrE) : 1;
     res.dbn.stability = Nc > 0 ? Nc / (phi * sec.A * Ry * gc) + Cm * amp * (My + Mz) / (sec.Wel * Ry * gc) : 0;
     res.dbn.NcrE = NcrE;
+    // Місцева стійкість стінок труби при стиску (ДБН В.2.6-198, 8.3.2, табл. 8.3 — коробчастий переріз;
+    // 8.3.5 а) у ред. Зміни № 1: λuw × √(φARyγc/N) ≤ 1,25λuw). hef — пласка частина стінки b − 2r₀.
+    const hef = sec.ro != null ? sec.b - 2 * sec.ro : sec.b - 3 * sec.t;
+    const lamW = sec.t > 0 ? hef / sec.t * Math.sqrt(Ry / E) : 0;
+    const lamUw0 = C.lamUwBox(lamBar);
+    const kUw = Nc > 0 && lamW > lamUw0 ? Math.min(1.25, Math.max(1, Math.sqrt(phi * sec.A * Ry * gc / Nc))) : 1;
+    res.dbn.lamW = lamW; res.dbn.lamUw = lamUw0 * kUw; res.dbn.lamUw0 = lamUw0; res.dbn.kUw = kUw; res.dbn.hef = hef;
+    res.dbn.local = Nc > 0 ? lamW / res.dbn.lamUw : 0;
     // ---------- EN 1993-1-1 ----------
     const fy = steel.Ryn * 1e6, g0 = opt.gammaM0 || 1.0, g1 = opt.gammaM1 || 1.0;
     const cl = C.sectionClass(sec, steel.Ryn);
@@ -106,7 +117,7 @@
       res.en.stability = Math.max(u1, u2);
       res.en.k = { kyy, kzz, kyz, kzy };
     } else res.en.stability = 0;
-    res.dbn.max = Math.max(res.dbn.strength, res.dbn.shear, res.dbn.eq, res.dbn.stability);
+    res.dbn.max = Math.max(res.dbn.strength, res.dbn.shear, res.dbn.eq, res.dbn.stability, res.dbn.local);
     res.en.max = Math.max(res.en.strength, res.en.shear, res.en.eq, res.en.stability, res.en.torsion);
     res.Nc = Nc; res.Nt = Nt; res.My = My; res.Mz = Mz; res.V = V; res.T = T; res.Lcr = Lcr;
     return res;
