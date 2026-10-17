@@ -6,6 +6,8 @@ html = (root / 'index.html').read_text(encoding='utf-8')
 css = (root / 'css/style.css').read_text(encoding='utf-8')
 scripts = re.findall(r'<script src="((?:js|vendor)/[^"]+)"></script>', html)
 js = '\n'.join((root / s).read_text(encoding='utf-8').replace('</script', '<\\/script') for s in scripts)
+# U+FFFD у таблицях кодувань бібліотек — записуємо екрановано (\ufffd), щоб файл не містив «битих» символів
+js = js.replace('\ufffd', '\\ufffd')
 fonts = re.search(r'<link rel="stylesheet" href="(https://fonts[^"]+)">', html).group(1)
 out = f'''<title>Каркас скульптури</title>
 <meta name="claude:viewport-fit-sides" content="cover">
