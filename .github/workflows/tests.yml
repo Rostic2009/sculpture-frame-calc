@@ -1,0 +1,21 @@
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Unit tests
+        run: for t in tests/*.test.js; do echo "== $t"; node "$t" > /dev/null || exit 1; done
+      - name: Formula self-checks
+        run: |
+          node -e "
+          for (const f of require('fs').readdirSync('js')) if (!/^(pages|app|view3d|vision-ui|pdf|drawings)/.test(f)) { try { require('./js/' + f); } catch (e) {} }
+          const r = SC.selftest(), bad = r.filter(x => !x.ok);
+          console.log(r.length + ' checks, ' + bad.length + ' failed');
+          if (bad.length) { console.log(JSON.stringify(bad, null, 1)); process.exit(1); }"
+      - name: Build single-file app
+        run: python3 build.py
