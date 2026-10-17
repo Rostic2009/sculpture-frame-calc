@@ -81,7 +81,7 @@
         sects: Math.max(...R.memberRes.map(m => m.best.u)),
         welds: Math.max(0, ...R.welds.map(w => w.u)),
         basePlate: Math.max(...R.supportRes.map(s => s.best.u)),
-        anchors: Math.max(...R.supportRes.map(s => s.best.b ? Math.max(s.best.b.anchorSteel, s.best.b.concrete.max, s.best.b.washer.max) : 0)),
+        anchors: Math.max(R.posobie && R.posobie.best ? R.posobie.best.u : 0, ...R.supportRes.map(s => s.best.b ? Math.max(s.best.b.anchorSteel, s.best.b.concrete.max, s.best.b.washer.max) : 0)),
         foundation: Math.max(R.found.govSls.chk.max, R.found.govUls.chk.max, R.found.settle.uS, R.found.settle.uT),
         rebar: R.found.slab.max,
         shell: Math.max(...R.shellRes.map(s => s.u)),
@@ -148,7 +148,7 @@
       if (t.dataset.min != null && v < +t.dataset.min) toast(`Значення менше допустимого мінімуму ${t.dataset.min}.`);
       set(state.pr, t.dataset.path, v);
       const p = t.dataset.path;
-      if (p === 'site.city') { const c = N.cities.find(x => x.name === v); if (c) { if (c.W0) state.pr.site.W0 = c.W0; if (c.S0) state.pr.site.S0 = c.S0; state.pr.meta.location = 'м. ' + c.name; } }
+      if (p === 'site.city') { const c = N.cityByName(v); if (c) { state.pr.site.W0 = c.W0; state.pr.site.S0 = c.S0; if (state.pr.site.ice.mode !== 'manual') { state.pr.site.ice.b = c.b; state.pr.site.ice.WB = c.WB; } state.pr.meta.location = 'м. ' + c.name.split(' (')[0]; } }
       if (p === 'site.windDistrict') state.pr.site.W0 = N.windDistricts.find(d => d.id === v).W0;
       if (p === 'site.snowDistrict') state.pr.site.S0 = N.snowDistricts.find(d => d.id === v).S0;
       if (p === 'site.cc') state.pr.site.gammaN = N.gammaN.find(g => g.id === v).g;

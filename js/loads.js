@@ -187,6 +187,61 @@
     t.nodes.forEach((id, k) => arr.push({ node: id, f: fs[k] }));
   }
 
+  /**
+   * Резонансне вихрове збудження (ДБН В.1.2-2, п. 9.17, Додаток К, Зміна № 2).
+   *  V_cr = n·d/St (К.1); резонансу немає, якщо V_cr > V_max(z_e) = 1,28·√(C_h(z_e)·W₀) (К.2, К.3), z_e = 0,8H.
+   *  Поперечне навантаження F(z) = 0,75·V_cr²·C_e,cr·φ(z)·d/δ, Н/м (К.4), δ = 0,05 (метал);
+   *  разом з ним — поздовжнє W_m,cr = (V_cr/V_max)²·W_m (К.6).
+   *  Для частини скульптури d·dz замінюється площею проєкції частини, φ(z) — переміщення вузла кріплення у формі коливань.
+   */
+  L.vortex = function (pr, mdl, P, clim, modal, Htot) {
+    const N = SC.norms, vm = N.vortexMeta;
+    const shape = pr.design.vortexShape || 'round';
+    const St = vm.St[shape], delta = vm.delta;
+    const hPed = pr.site.hPed || 0;
+    const ze = 0.8 * Htot;
+    const Che = N.Ch(ze, pr.site.terrain, modal.modes[0].T, (pr.overrides || {}).ChTables).value;
+    const Vmax = 1.28 * Math.sqrt(Che * clim.W0);
+    const nodeIdx = P.idx, pos = id => { const n = P.model.nodes[nodeIdx.get(id)]; return [n.x, n.y, n.z]; };
+    const res = [];
+    for (const md of modal.modes.slice(0, 2)) {
+      let sx = 0, sy = 0; P.model.nodes.forEach((n, k) => { sx += md.phi[k * 6] ** 2; sy += md.phi[k * 6 + 1] ** 2; });
+      const dir = sx >= sy ? 0 : 1; // напрямок коливань
+      const phiMax = Math.max(1e-12, ...P.model.nodes.map((n, k) => Math.abs(md.phi[k * 6 + dir])));
+      // характерний поперечний розмір d (перпендикулярно вітру = уздовж коливань): ширина несучої частини на z_e
+      const parts = pr.parts || [];
+      const body = parts.filter(p => p.kind !== 'cant').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null) || parts[0];
+      const hb = body ? Math.max(0.1, (body.z2 || body.z) - (body.z1 || 0)) : 1;
+      const d = body ? (dir === 0 ? body.Ay : body.Ax) / hb : 0.5; // Ay — проєкція для вітру вздовж Y, її ширина — розмір уздовж X
+      const n = 1 / md.T, Vcr = n * d / St;
+      const Hd = Htot / Math.max(d, 0.05);
+      const Ce = shape === 'round' ? 0.3 : (Vcr / Vmax < 0.8 ? 1.1 : 0.6);
+      res.push({ T: md.T, n, dir: dir === 0 ? 'X' : 'Y', d, Vcr, Vmax, ze, Che, St, Ce, Hd, required: Hd > 10, resonance: Vcr <= Vmax, phiMax, md, dirIdx: dir });
+    }
+    const gov = res.filter(r => r.resonance).sort((a, b) => a.Vcr - b.Vcr)[0] || null;
+    let VX = null;
+    if (gov) {
+      const thWind = gov.dirIdx === 0 ? 90 : 0; // вітер перпендикулярно до коливань
+      VX = { nodal: [], dist: [], dir: gov.dirIdx === 0 ? [1, 0, 0] : [0, 1, 0], info: { parts: [], thWind, ratio: (gov.Vcr / gov.Vmax) ** 2 } };
+      (pr.parts || []).forEach((p, pi) => {
+        const pa = mdl.partAttach.find(a => a.part === pi);
+        const A = gov.dirIdx === 0 ? p.Ay : p.Ax;
+        let Fp = 0;
+        pa.targets.forEach(t => {
+          const k = nodeIdx.get(t.nodes[0]);
+          const phi = Math.abs(gov.md.phi[k * 6 + gov.dirIdx]) / gov.phiMax;
+          const F = 0.75 * gov.Vcr ** 2 * gov.Ce * phi * A * t.share / delta;
+          const Fv = gov.dirIdx === 0 ? [F, 0, 0] : [0, F, 0];
+          Fp += F;
+          pushDistributed(VX.nodal, t, Fv, pos, p.kind === 'cant' ? null : [p.x, p.y, t.c[2]]);
+        });
+        VX.info.parts.push({ name: p.name, F: Fp });
+      });
+      VX.alongTheta = thWind;
+    }
+    return { modes: res, gov, VX, shape, St, delta, src: vm.src };
+  };
+
   /** Лінійна комбінація завантажень: [{case, k}] → навантаження. */
   L.combine = function (terms) {
     const out = { nodal: [], dist: [], therm: [] };

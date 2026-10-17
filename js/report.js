@@ -15,13 +15,19 @@
   const tbl = (head, rows, cls) => `<div class="tw"><table class="${cls || ''}"><thead><tr>${head.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.map(r => `<tr>${r.map(c => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
   Rp.fmt = { f, kN, kNm, MPa, U, esc, tbl, pc };
 
+  // опис визначального сполучення за його кодом: W…, S…, Tp/Tm…, Q…, I…, IW…, U…, VX, E…, M1, A1
   function actionOf(name) {
-    if (/^E/.test(name)) return 'сейсміка';
-    if (/^U/.test(name)) return 'вітер (мінімальна вага — відрив/перекидання)';
-    if (/^SW/.test(name)) return 'сніг + вітер';
-    if (/^W/.test(name)) return 'вітер';
-    if (/^C1/.test(name)) return 'власна вага + сніг';
-    return name;
+    const id = String(name).split(':')[0].trim();
+    if (/^E/.test(id)) return 'сейсміка';
+    if (/^U/.test(id)) return 'вітер при мінімальній вазі (відрив, перекидання)';
+    if (/^IW/.test(id)) return 'ожеледь з вітром';
+    if (/^VX/.test(id)) return 'резонансне вихрове збудження';
+    if (/^M1/.test(id)) return 'монтаж';
+    if (/^A1/.test(id)) return 'аварійний вплив';
+    const tok = id.replace(/\d+$/, '').match(/W|S|Tp|Tm|Q|I/g) || [];
+    const nm = { W: 'вітер', S: 'сніг', Tp: 'нагрівання', Tm: 'охолодження', Q: 'обслуговування', I: 'ожеледь' };
+    if (!tok.length) return id;
+    return nm[tok[0]] + (tok[1] ? ' + ' + nm[tok[1]] + ' (ψ = 0,9)' : '') + (tok.length > 2 ? ' + інші (ψ = 0,7)' : '');
   }
 
   Rp.build = function (R, opt) {
@@ -125,7 +131,7 @@
 
     // 5
     H(2, '5. Розрахункові сполучення');
-    P(`Основні сполучення (ДБН В.1.2-2, р. 4): постійне + одне змінне з повним значенням; постійне + два змінних з ψ = ${N.psi.short} (${N.psi.src}, ${st(N.psi.status)}). Напрямки вітру θ = 0…360° з кроком ${pr.design.dirStep}°. Усі ефекти множаться на γn = ${f(pr.site.gammaN, 2)}.
+    P(`Основні сполучення (ДБН В.1.2-2, р. 4): постійне + змінні за формулою (4.4) ДБН В.1.2-2 (Зміна № 2): основне короткочасне — ψ = 1,0, друге — 0,9, решта — 0,7; перебираються всі варіанти основного й другого впливу (${st(N.psi.status)}). Напрямки вітру θ = 0…360° з кроком ${pr.design.dirStep}°. Усі ефекти множаться на γn = ${f(pr.site.gammaN, 2)}.
        Особливе сполучення (сейсміка): ${N.seismicComb.G}·G + ${N.seismicComb.snow}·S ± E, вітер не враховується. Для перекидання/відриву — ${N.gammaG.favourable}·G + W.`);
     const cl = R.combos.filter(cb => cb.theta == null || cb.theta === 0).map(cb => [cb.id, cb.situation, esc(cb.name), cb.lead || '—', (cb.acc || []).join(', ') || '—']);
     s.push(tbl(['Код', 'Ситуація', 'Склад', 'Ведучий', 'Супутні'], cl.concat([['…', '', `усього ${R.combos.length} сполучень (θ = 0…360°)`, '', '']])));

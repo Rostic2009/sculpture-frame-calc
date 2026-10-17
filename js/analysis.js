@@ -17,6 +17,10 @@
     if (opts.dirStep) pr.design.dirStep = opts.dirStep;
     if (opts.noSeismic) pr.site.seismic.on = false;
 
+    // температура за ДБН В.1.2-2, р. 11 (якщо не задано вручну) — на копії проєкту, щоб звіт показував прийняті значення
+    if (pr.site.temp && pr.site.temp.mode !== 'manual') { const tc = N.tempClimate(pr.site.temp); pr.site.temp.dTplus = +tc.dTw.toFixed(1); pr.site.temp.dTminus = +tc.dTc.toFixed(1); pr.site.temp.calc = tc; }
+    // ожеледь і W_B — з Додатка Е для міста (якщо обрано режим «за містом»)
+    if (pr.site.ice && pr.site.ice.mode !== 'manual') { const ct = N.cityByName(pr.site.city); if (ct) { pr.site.ice.b = ct.b; pr.site.ice.WB = ct.WB; } }
     // ---------- 0. оболонка: крок ребер допоміжного каркаса і їхня маса (додається до маси частин) ----------
     const climPre = SC.loads.climate(pr, null);
     const shellRes = (pr.parts || []).map(p => {
@@ -41,34 +45,74 @@
     const clim = SC.loads.climate(pr, T1);
     if (T1 > 0.25 && !pr.site.CdConfirmed) W('warn', `Період T₁ = ${T1.toFixed(3)} с > 0,25 с: застосовано табл. 9.02, C_d = ${pr.site.Cd} прийнято користувачем — підтвердіть C_d за Зміною № 1 ДБН В.1.2-2.`, 'wind');
     const cases = SC.loads.baseCases(pr, mdl, P, clim);
+    // вихрове збудження (п. 9.17, дод. К) — потрібна форма коливань, тому після модального аналізу
+    const Hsc = Math.max(...mdl.nodes.map(n => n.z), ...(pr.parts || []).map(p => Math.max(p.z2 || 0, p.z || 0))) + (pr.site.hPed || 0);
+    const vortex = SC.loads.vortex(pr, mdl, P, clim, modalG, Hsc);
+    if (vortex.VX) cases.VX = vortex.VX;
     const zMax = mdl.H + (pr.site.hPed || 0) + 1;
     if (!clim.qAt(zMax).ok) W('error', `Висота ${zMax.toFixed(1)} м поза внесеними значеннями табл. ${clim.ChTable}. Введіть C_h вручну у «Нормативна база».`, 'wind');
 
-    // ---------- 2. сполучення (ведучий / супутні впливи) ----------
-    const gN = pr.site.gammaN || 1, psi = N.psi.short;
+    // ---------- 2. сполучення (ДБН В.1.2-2, п. 4.18, формула (4.4) у редакції Зміни № 2) ----------
+    // Короткочасні: основне (провідне) — ψ = 1,0; друге — 0,9; решта — 0,7. Перебираються всі варіанти провідного й другого.
+    const gN = pr.site.gammaN || 1, PS = N.psi.short;
     const combos = [];
     const add = (id, name, terms, o) => combos.push(Object.assign({ id, name, terms, kind: 'uls', situation: 'постійна' }, o || {}));
     const ice = pr.site.ice || {}, tmp = pr.site.temp || {};
-    const gI = ice.gfm || 1.0, gT = tmp.gf || 1.1, gQ = 1.2;
-    add('C1', `${fmt(gG)}·G + ${fmt(clim.gfmS)}·S`, [{ c: cases.G, k: gG * gN }, { c: cases.S, k: clim.gfmS * gN }], { dir: [1, 0, 0], lead: 'S', acc: [] });
-    if (cases.I) add('I1', `${fmt(gG)}·G + ${fmt(gI)}·I (ожеледь)`, [{ c: cases.G, k: gG * gN }, { c: cases.I, k: gI * gN }], { dir: [1, 0, 0], lead: 'I', acc: [] });
-    if (cases.Tp) for (const [T, nm] of [[cases.Tp, 'T+'], [cases.Tm, 'T−']]) add('T' + (nm === 'T+' ? 'p' : 'm'), `${fmt(gG)}·G + ${fmt(gT)}·${nm}`, [{ c: cases.G, k: gG * gN }, { c: T, k: gT * gN }], { dir: [1, 0, 0], lead: nm, acc: [] });
-    if (cases.Q) add('Q1', `${fmt(gG)}·G + ${fmt(gQ)}·Q (обслуговування)`, [{ c: cases.G, k: gG * gN }, { c: cases.Q, k: gQ * gN }], { dir: [1, 0, 0], lead: 'Q', acc: [] });
+    const ov = pr.overrides || {};
+    const gI = ov.gfmI != null ? ov.gfmI : N.interp(N.iceGammaFm.T, N.iceGammaFm.g, pr.site.Tlife);
+    const gIW = ov.gfwI != null ? ov.gfwI : N.interp(N.iceWindGamma.T, N.iceWindGamma.g, pr.site.Tlife);
+    const gT = tmp.gf || 1.1, gQ = 1.2;
+    // набір короткочасних впливів: {key, name, term(c), γ}
+    const shortSet = (Wc) => {
+      const L = [];
+      if (Wc) L.push({ key: 'W', name: `W(${Wc.theta}°)`, c: Wc, g: clim.gfmW });
+      if (cases.S && cases.S.info.total > 0) L.push({ key: 'S', name: 'S', c: cases.S, g: clim.gfmS });
+      if (cases.Tp) { L.push({ key: 'T+', name: 'T+', c: cases.Tp, g: gT, excl: 'T' }); L.push({ key: 'T−', name: 'T−', c: cases.Tm, g: gT, excl: 'T' }); }
+      if (cases.Q) L.push({ key: 'Q', name: 'Q', c: cases.Q, g: gQ });
+      return L;
+    };
+    // сполучення: провідний a (ψ=1), другий b (ψ=0,9), інші (ψ=0,7); T+ і T− взаємовиключні (п. 4.16)
+    const comboFrom = (L, a, b, extra) => {
+      const used = [a].concat(b ? [b] : []);
+      const rest = L.filter(x => !used.includes(x) && !used.some(u => u.excl && u.excl === x.excl));
+      const restSel = []; const seenEx = new Set(used.filter(u => u.excl).map(u => u.excl));
+      for (const x of rest) { if (x.excl) { if (seenEx.has(x.excl)) continue; seenEx.add(x.excl); } restSel.push(x); }
+      const terms = [{ c: cases.G, k: gG * gN }, { c: a.c, k: PS[0] * a.g * gN }];
+      if (b) terms.push({ c: b.c, k: PS[1] * b.g * gN });
+      restSel.forEach(x => terms.push({ c: x.c, k: PS[2] * x.g * gN }));
+      const nm = `${fmt(gG)}·G + ${fmt(a.g)}·${a.name}` + (b ? ` + 0,9·${fmt(b.g)}·${b.name}` : '') + restSel.map(x => ` + 0,7·${fmt(x.g)}·${x.name}`).join('');
+      return Object.assign({ name: nm, terms, lead: a.key === 'T+' || a.key === 'T−' ? a.key : a.key, acc: (b ? [b.key] : []).concat(restSel.map(x => x.key)) }, extra || {});
+    };
+    {
+      const L = shortSet(null);
+      L.forEach((a, ia) => {
+        const others = L.filter(x => x !== a && !(x.excl && x.excl === a.excl));
+        if (!others.length) { const c0 = comboFrom(L, a, null); add(`${a.key}1`.replace('+', 'p').replace('−', 'm'), c0.name, c0.terms, { dir: [1, 0, 0], lead: c0.lead, acc: c0.acc }); return; }
+        others.forEach(b => { const c0 = comboFrom(L, a, b); add(`${a.key}${b.key}`.replace(/\+/g, 'p').replace(/−/g, 'm'), c0.name, c0.terms, { dir: [1, 0, 0], lead: c0.lead, acc: c0.acc }); });
+      });
+      if (cases.I) add('I1', `${fmt(gG)}·G + ${fmt(gI)}·I (ожеледь)`, [{ c: cases.G, k: gG * gN }, { c: cases.I, k: gI * gN }], { dir: [1, 0, 0], lead: 'I', acc: [] });
+    }
     for (const Wc of cases.W) {
       const th = Wc.theta, d = [Math.cos(th * Math.PI / 180), Math.sin(th * Math.PI / 180), 0];
+      const L = shortSet(Wc), w = L[0];
       add(`W${th}`, `${fmt(gG)}·G + ${fmt(clim.gfmW)}·W(${th}°)`, [{ c: cases.G, k: gG * gN }, { c: Wc, k: clim.gfmW * gN }], { dir: d, theta: th, lead: 'W', acc: [] });
-      const accT = [{ c: cases.G, k: gG * gN }, { c: cases.S, k: psi * clim.gfmS * gN }, { c: Wc, k: psi * clim.gfmW * gN }];
-      const accN = ['S'];
-      if (cases.Tp) { accT.push({ c: cases.Tm, k: psi * gT * gN }); accN.push('T−'); }
-      if (cases.Q) { accT.push({ c: cases.Q, k: psi * gQ * gN }); accN.push('Q'); }
-      add(`SW${th}`, `${fmt(gG)}·G + ${fmt(psi)}·(${fmt(clim.gfmS)}·S + ${fmt(clim.gfmW)}·W(${th}°)${cases.Tp ? ' + ' + fmt(gT) + '·T−' : ''}${cases.Q ? ' + ' + fmt(gQ) + '·Q' : ''})`, accT, { dir: d, theta: th, lead: 'W', acc: accN });
+      // вітер провідний, другий — кожен з інших; та кожен інший провідний, вітер другий
+      L.filter(x => x !== w).forEach(b => {
+        const c1 = comboFrom(L, w, b); add(`W${b.key}${th}`.replace(/\+/g, 'p').replace(/−/g, 'm'), c1.name, c1.terms, { dir: d, theta: th, lead: 'W', acc: c1.acc });
+        const c2 = comboFrom(L, b, w); add(`${b.key}W${th}`.replace(/\+/g, 'p').replace(/−/g, 'm'), c2.name, c2.terms, { dir: d, theta: th, lead: c2.lead, acc: c2.acc });
+      });
       add(`U${th}`, `${N.gammaG.favourable}·G + ${fmt(clim.gfmW)}·W(${th}°) (відрив, перекидання)`, [{ c: cases.G, k: N.gammaG.favourable * gN }, { c: Wc, k: clim.gfmW * gN }], { dir: d, theta: th, favourable: true, lead: 'W', acc: [] });
       if (cases.I && th % 90 === 0) {
-        const wi = (ice.WB || 0) / Math.max(clim.W0, 1);
-        add(`IW${th}`, `${fmt(gG)}·G + ${fmt(gI)}·I + ${fmt(clim.gfmW)}·W_ожел(${th}°) [W_B = ${ice.WB} Па]`, [{ c: cases.G, k: gG * gN }, { c: cases.I, k: gI * gN }, { c: Wc, k: wi * clim.gfmW * gN }], { dir: d, theta: th, lead: 'I', acc: ['W_B'] });
+        // п. 10.9: вітер на вкриті ожеледдю елементи — W_B замість W₀ при C_rel = C_dir = C_d = 1; γ_fw — табл. 10.5
+        const wi = (ice.WB || 0) / Math.max(clim.W0 * clim.Crel * clim.Cdir * clim.Cd, 1);
+        add(`IW${th}`, `${fmt(gG)}·G + ${fmt(gI)}·I + ${fmt(gIW)}·W_B(${th}°) [W_B = ${ice.WB} Па]`, [{ c: cases.G, k: gG * gN }, { c: cases.I, k: gI * gN }, { c: Wc, k: wi * gIW * gN }], { dir: d, theta: th, lead: 'I', acc: ['W_B'] });
       }
     }
-    if (cases.M) add('M1', `1,0·G + 1,2·M (монтажна ситуація)`, [{ c: cases.G, k: 1.0 }, { c: cases.M, k: 1.2 }], { dir: [1, 0, 0], situation: 'монтажна', lead: 'M', acc: [] });
+    if (cases.VX) {
+      const Wal = cases.W.find(w => w.theta === cases.VX.alongTheta) || cases.W[0];
+      add('VX', `${fmt(gG)}·G + F_вихр(К.4) + (V_cr/V_max)²·${fmt(clim.gfmW)}·W(${Wal.theta}°) (К.6)`, [{ c: cases.G, k: gG * gN }, { c: cases.VX, k: gN }, { c: Wal, k: cases.VX.info.ratio * clim.gfmW * gN }], { dir: cases.VX.dir, lead: 'VX', acc: ['W'] });
+    }
+    if (cases.M) add('M1', `1,0·G + 1,2·M (монтажна ситуація; кліматичні −20 %, п. 4.20)`, [{ c: cases.G, k: 1.0 }, { c: cases.M, k: 1.2 }], { dir: [1, 0, 0], situation: 'монтажна', lead: 'M', acc: [] });
     if (cases.A) add('A1', `1,0·G + 1,0·A (аварійна ситуація)`, [{ c: cases.G, k: 1.0 }, { c: cases.A, k: 1.0 }], { dir: [1, 0, 0], situation: 'аварійна', lead: 'A', acc: [] });
     const sls = [];
     sls.push({ id: 'K1', name: 'G + S (характ.)', terms: [{ c: cases.G, k: 1 }, { c: cases.S, k: 1 }] });
@@ -270,7 +314,11 @@
     // осідання і крен — від найбільшого середнього тиску SLS та найбільшого моменту
     const sMean = fSls.reduce((m, x) => x.chk.p && x.chk.p.pmean > m.chk.p.pmean ? x : m, fSls[0]);
     const sMom = fSls.reduce((m, x) => Math.hypot(x.res.Mx, x.res.My) > Math.hypot(m.res.Mx, m.res.My) ? x : m, fSls[0]);
-    const settle = SC.concrete.settlement(fd, sMean.chk.p.pmean, sMom.res.Mx, sMom.res.My);
+    let settle = SC.concrete.settlement(fd, sMean.chk.p.pmean, sMom.res.Mx, sMom.res.My);
+    // зони руйнування ґрунту під краями підошви (Барвашов): за H₀ > 0 осідання уточнюється (компресія в межах H₀)
+    const edgeZone = SC.concrete.edgeZone(fd, govSls.chk.p.pmax);
+    if (edgeZone.H0 > 0) { const s1 = settle; settle = SC.concrete.settlement(fd, sMean.chk.p.pmean, sMom.res.Mx, sMom.res.My, { H0: edgeZone.H0 }); settle.sLinear = s1.s; W('info', `Під краями підошви утворюється зона руйнування ґрунту глибиною H₀ = ${(edgeZone.H0 * 1000).toFixed(0)} мм (Барвашов, за Пузиревським); осідання уточнено: ${(s1.s * 1000).toFixed(1)} → ${(settle.s * 1000).toFixed(1)} мм.`, 'found'); }
+    settle.edgeZone = edgeZone;
     settle.uS = settle.s / (fd.sLim || 0.1); settle.uT = settle.tilt / (fd.tiltLim || 0.004);
     // підколонник
     const pedN = Math.min(...fUls.map(x => -x.res.Fz));
@@ -281,6 +329,9 @@
     const rebar = SC.concrete.schedule(fd, slab, ped, pr.base.anchorReinf, supNodes.length, nA);
     if (govSls && govSls.chk.max > 1) W('error', `Фундамент: тиск під підошвою не проходить (U = ${govSls.chk.max.toFixed(2)}, ${govSls.cb.name}).`, 'found');
     if (govUls && govUls.chk.max > 1) W('error', `Фундамент: перекидання/зсув не забезпечено (U = ${govUls.chk.max.toFixed(2)}, ${govUls.cb.name}).`, 'found');
+    // масивність плити: виліт a_v від грані підколонника до робочої висоти d (EN 1992-1-1, 6.2.2(6), 6.5; Гоцуляк, Войтенко, 2011)
+    slab.av = Math.min(fd.B - fd.pedB, fd.L - fd.pedL) / 2; slab.avd = slab.av / Math.max(slab.dBot || 0.5, 0.05); slab.deep = slab.avd <= 2;
+    if (slab.deep) W('info', `Фундаментна плита масивна: a_v/d = ${slab.avd.toFixed(2)} ≤ 2 — зусилля передаються стиснутими «підкосами» через товщину плити; армування, підібране за згином консолі (теорія пластин), іде в запас. Уточнення — тривимірна модель або модель «підкіс–затяжка» (EN 1992-1-1, 6.5).`, 'found');
     if (slab.punching > 1) W('error', `Продавлювання плити: v_Ed/v_Rd,c = ${slab.punching.toFixed(2)} > 1.`, 'found');
     if (Math.max(slab.shearX, slab.shearY) > 1) W('error', 'Поперечна сила в плиті перевищує V_Rd,c — збільшіть товщину.', 'found');
     if (slab.crack > 1) W('warn', `Тріщиностійкість: діаметр стрижнів більший за допустимий φ*_s = ${slab.phiMax} мм при σ_s = ${slab.sigS.toFixed(0)} МПа (EN 1992-1-1, табл. 7.2N).`, 'found');
@@ -298,14 +349,14 @@
     // ---------- 13. інші попередження ----------
     const anyCfDefault = (pr.parts || []).some(p => !p.CfConfirmed) && !(pr.site.aero && pr.site.aero.confirmed);
     if (anyCfDefault) W('warn', 'Аеродинамічні коефіцієнти C_F не підтверджені продуванням/CFD або погодженою методикою — результат ПОПЕРЕДНІЙ (ТЗ 5; 3.2.6).', 'wind');
-    const top = (pr.parts || []).reduce((m, p) => (p.z > (m ? m.z : -1) ? p : m), null);
-    let vortex = null;
-    if (top) {
-      const b = Math.sqrt(Math.max(top.Ax, top.Ay) || 0.5);
-      const vcrit = b / (T1 * 0.12);
-      const vm = Math.sqrt(2 * clim.W0 * clim.qAt(top.z + (pr.site.hPed || 0)).Ch / 1.25);
-      vortex = { b, vcrit, vm, need: vcrit < 1.25 * vm };
-      if (vortex.need) W('warn', `Вихрове збудження: v_crit = ${vcrit.toFixed(1)} м/с < 1,25·v_m = ${(1.25 * vm).toFixed(1)} м/с — потрібна перевірка поперечних коливань і втоми швів/анкерів (EN 1991-1-4, дод. E; ТЗ WLD-070).`, 'dyn');
+    for (const v of vortex.modes) {
+      if (v.resonance) W(v.required ? 'error' : 'warn', `Вихрове збудження (ДБН В.1.2-2, дод. К): форма ${v.dir}, T = ${v.T.toFixed(3)} с, V_cr = n·d/St = ${v.Vcr.toFixed(1)} м/с ≤ V_max = 1,28√(C_h·W₀) = ${v.Vmax.toFixed(1)} м/с — резонанс можливий; навантаження за (К.4) і (К.6) враховано в сполученні VX. Можливе накопичення втомних пошкоджень швів і анкерів (п. К.6).${v.required ? '' : ` h/d = ${v.Hd.toFixed(1)} ≤ 10 — за п. 9.17 перевірка не обов'язкова, виконано в запас.`}`, 'dyn');
+    }
+    // анкерні болти — незалежна перевірка за Посібником до СНиП 2.09.03 (формули 1–19)
+    let posobie = null;
+    if (SC.posobie) {
+      posobie = SC.posobie.run({ pr, supportRes, solved, vortex });
+      if (posobie.applicable && posobie.best && posobie.best.u > 1) W('error', `Анкерні болти не проходять перевірку за Посібником до СНиП 2.09.03 (U = ${posobie.best.u.toFixed(2)}, опора ${posobie.best.node}): збільште діаметр, глибину закладення або кількість болтів.`, 'base');
     }
     const region = N.checkRegion(pr);
     region.rows.filter(r => r.status === 'range' || r.status === 'diff').forEach(r => W(r.status === 'range' ? 'error' : 'warn', `Дані регіону: ${r.param} = ${r.entered} ${r.unit} — ${N.regionStatusText[r.status]} (${r.ref == null ? '—' : r.ref}; ${r.src})${r.note ? '. ' + r.note : ''}.`, 'site'));
@@ -319,7 +370,7 @@
       ok: true, time: Date.now() - t0, pr, mdl, P, clim, cases, combos, sls, solved, stations, seis, modalG, T1,
       memberRes, sectionRes, govMember, alphaCr, alphaCombo, uMax, uNode, uCombo, uLim, Htot, supportRes, welds, flexLog, shellRes, vortex,
       found: { fd, Rsoil, fSls, fUls, govSls, govUls, slab, reinf: slab, settle, ped, rebar, soil },
-      spec, warn, status, eqMax, region,
+      spec, warn, status, eqMax, region, posobie,
     };
   };
 

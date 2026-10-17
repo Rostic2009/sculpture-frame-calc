@@ -219,11 +219,35 @@
       row('Мінімальні відстані між анкерами / до краю', `s = ${f(c.smin, 0)} мм; c = ${f(c.cmin, 0)} мм`, `≥ ${Math.max(50, 4 * bp.d)} мм`, c.geomOk ? 0.5 : 1.01, 'EN 1992-4, 7.2.1.7', 'edge'),
     ];
     s.push(checks(rows)); s.push(legend());
-    H(2, '2.5. Висновок по анкерах');
-    const uA = Math.max(b.anchorT, b.anchorSteel, c.max, b.washer.max);
+    H(2, '2.5. Перевірка за Посібником з проєктування анкерних болтів (до СНиП 2.09.03)');
+    s.push(RS.posobieBlock(R));
+    H(2, '2.6. Висновок по анкерах');
+    const uA = Math.max(b.anchorT, b.anchorSteel, c.max, b.washer.max, R.posobie && R.posobie.best ? R.posobie.best.u : 0);
     P(`Прийнято <b>${nA} ${embed ? 'шпильок Ø' : 'болтів М'}${bp.d}</b> довжиною ${f(la * 1000, 0)} мм${embed ? '' : `, клас ${bp.grade}`}, загальна маса ${f(mOne * nA, 1)} кг. Найбільший коефіцієнт використання U = ${f(uA, 3)} — ${uA <= 1 ? `запас ${f((1 - uA) * 100, 0)} %` : '<b>не забезпечено</b>'}. ${b.Tmax > 0 ? `Анкери розтягнуті (до ${kN(b.Tmax)} кН): момент від вітру/сейсміки перевищує утримувальну дію ваги — анкери є несучими, їх потрібно затягувати й контролювати.` : 'Анкери не розтягуються в жодному сполученні — момент урівноважується стиском, анкери сприймають зсув і забезпечують монтажну стійкість.'}`);
     if (!opt.inner) s.push(sign(R));
     return s.join('\n');
+  };
+
+  /** Блок «Перевірка за Посібником до СНиП 2.09.03» (формули 1–19) — для звіту 2 і сторінки анкерів. */
+  RS.posobieBlock = function (R) {
+    const pb = R.posobie, PB = SC.posobie;
+    if (!pb) return '';
+    if (!pb.applicable) return `<p class="note">Посібник до СНиП 2.09.03 не застосовується: ${esc(pb.reason)}.</p>`;
+    const c = pb.best.c, g0 = c.gov, bp = R.pr.base;
+    const rows = [
+      row(`Зусилля в розтягнутому болті, ф. (5)–(6): x = l<sub>a</sub> − √(l<sub>a</sub>² − 2(M + Nc)/(R<sub>b</sub>b<sub>s</sub>)), P = (R<sub>b</sub>b<sub>s</sub>x − N)/n`, g0.ok ? `M = ${kN(g0.M)} кН·м, N = ${kN(c.N)} кН; x = ${f(g0.x * 1000, 1)} мм → <b>P = ${kN(c.P)} кН</b>` : esc(g0.reason), `x ≤ ξ<sub>R</sub>l<sub>a</sub> = ${f(g0.xiR, 3)}·${f(g0.la * 1000, 0)} = ${f(g0.xLim * 1000, 0)} мм (ф. 7–8)`, g0.ok ? g0.x / g0.xLim : 9.99, 'Посібник, п. 3.14', 'bearing'),
+      row('Площа болта за міцністю, ф. (1): A<sub>sa</sub> ≥ k₀P/R<sub>ba</sub>', `k₀ = ${c.ko}; A<sub>sa,req</sub> = ${f(c.AsaReq * 1e4, 3)} см²`, `A<sub>sa</sub> = ${f(c.Asa * 1e4, 2)} см² (М${c.d}); R<sub>ba</sub> = ${f(c.Rba / 1e6, 0)} МПа (${c.steel}, табл. 3)`, c.uStrength, 'Посібник, п. 3.7, 3.9', 'anchorT'),
+    ];
+    if (c.AsaFat != null) rows.push(row('Витривалість, ф. (2): A<sub>sa</sub> ≥ 1,8ηβP/(γR<sub>ba</sub>)', `η = ${c.type.eta}; β = ${c.beta}; γ = ${c.gammaN}; A = ${f(c.AsaFat * 1e4, 3)} см²`, `A<sub>sa</sub> = ${f(c.Asa * 1e4, 2)} см²`, c.uFatigue, 'Посібник, п. 3.10, табл. 4–6', 'anchorT'));
+    rows.push(row('Зсув тертям від N і затягування, ф. (17): Q ≤ f(nA<sub>sa</sub>R<sub>ba</sub>/4 + N), f = 0,25', `Q = ${kN(c.H)} кН`, `${kN(c.Qf)} кН`, c.uShearFriction, 'Посібник, п. 3.18', 'slide'));
+    rows.push(row('Зсув стрижнями болтів, ф. (13)–(14): Q ≤ 0,4A<sub>sa</sub>R<sub>ba</sub>n, P ≤ 0,6A<sub>sa</sub>R<sub>ba</sub>n', `Q = ${kN(c.H)} кН`, `${kN(c.Qbolt)} кН`, c.uShearBolt, 'Посібник, п. 3.17', 'anchorV'));
+    rows.push(row(`Глибина закладення, ф. (19): H₀ = ${c.type.H}d·m₁·m₂ (${c.type.name})`, `h<sub>ef</sub> = ${bp.hef} мм`, `H₀ = ${f(c.H0 * 1000, 0)} мм (m₁ = 0,7/${PB.Rbt(c.cls)} = ${f(c.m1, 3)}, ${c.cls}; m₂ = ${f(c.m2, 3)})`, c.uDepth, 'Посібник, п. 3.20, табл. 4, 9', 'cone'));
+    rows.push(row('Відстань між болтами (табл. 4)', `${bp.plateB - 2 * bp.edge} мм`, `≥ ${c.sMin} мм (${c.type.s}d)`, c.sMin / Math.max(1, bp.plateB - 2 * bp.edge), 'Посібник, п. 3.23', 'edge'));
+    const cEdge = R.supportRes[0] && R.supportRes[0].best.b ? R.supportRes[0].best.b.concrete.cmin : null;
+    if (cEdge != null) rows.push(row('Від осі болта до грані фундаменту (підколонника)', `${f(cEdge, 0)} мм`, `≥ ${c.cMin} мм (${c.type.c}d, не менше ${c.d <= 30 ? 100 : c.d <= 48 ? 150 : 200} мм)`, c.cMin / Math.max(1, cEdge), 'Посібник, п. 3.23', 'edge'));
+    const mk = c.Mkr > 0 ? `F = ${c.F === 0 ? 0 : (c.ko > 1.1 ? '1,1' : '0,75')}·P = ${kN(c.F)} кН; M<sub>кр</sub> = F·χ = ${kN(c.F)}·${c.chi} = ${f(c.Mkr, 1)} Н·м (ф. 18, табл. 8)` : `розтягу немає — болти конструктивні; момент затягування не більше ${c.Mmax || '—'} Н·м (табл. 14)`;
+    return `<p>Опора ${pb.best.node}, визначальне сполучення ${esc(pb.best.combo)}. Болт ${c.type.name}, сталь ${c.steel} (клас ${esc(bp.grade)} прирівняно за п. 3.2 прим.), бетон ${esc(R.pr.found.concrete)} → ${c.cls}, R<sub>b</sub> = ${f(c.Rb / 1e6, 1)} МПа (табл. 7). Навантаження ${pb.dynamic ? 'динамічні (резонансне вихрове збудження)' : 'статичні (п. 3.11 — для будівельних конструкцій)'}.</p>` + checks(rows) +
+      `<p>Затягування (п. 3.8, 3.19): ${mk}.</p><p class="note">Посібник (ЦНИИпромзданий, до СНиП 2.09.03) — методичний документ; використовується як незалежна перевірка поряд з EN 1993-1-8 / EN 1992-4. Формула (5) приймає пластичну епюру R<sub>b</sub> під плитою, тому дає менший розтяг, ніж пружна модель контакту застосунку; у висновку приймається більше з двох значень U. У табл. 10 Посібника для М48 надруковано 19,72 см² — це помилка (фактично 14,7 см²); у застосунку виправлено.</p>`;
   };
 
   // =====================================================================
@@ -279,6 +303,8 @@
       row('Підколонник: вертикальна арматура', `${Fd.ped.n} Ø${Fd.ped.dia}`, 'A<sub>s,min</sub> і M<sub>Ed</sub>', Fd.ped.util, 'EN 1992-1-1, 9.5', 'rc'),
     ];
     s.push(checks(ck)); s.push(legend());
+    if (sl.deep) P(`<b>Масивна плита:</b> виліт від грані підколонника a<sub>v</sub> = ${f(sl.av * 1000, 0)} мм, робоча висота d = ${f(sl.dBot * 1000, 0)} мм, a<sub>v</sub>/d = ${f(sl.avd, 2)} ≤ 2. Навантаження від підколонника передається на ґрунт значною мірою стиснутими «підкосами» через товщину плити, тому армування, визначене за згином консолі (теорія пластин Кірхгофа), іде в запас. Тривимірні розрахунки товстих фундаментних плит (Є.О. Гоцуляк, П.В. Войтенко, «Опір матеріалів і теорія споруд», 2011, № 87) показують, що плоска модель завищує розтяг в арматурі під колонами; уточнення можливе моделлю «підкіс–затяжка» (EN 1992-1-1, 6.5).`);
+    if (Fd.settle.edgeZone) P(`Зони руйнування ґрунту під краями підошви (В.А. Барвашов, НИИОСП; за розв'язком Н.П. Пузиревського при K₀ = 1): H₀ = (p − γh)(ctgφ + φ − π/2)/(πγ) − c/(γ·tgφ) − h = ${f(Fd.settle.edgeZone.H0 * 1000, 0)} мм при крайовому тиску p = ${f(Fd.settle.edgeZone.p, 1)} кПа. ${Fd.settle.edgeZone.H0 > 0 ? `У межах H₀ тиск не розподіляється (компресія) — осідання уточнено: ${f(Fd.settle.sLinear * 1000, 1)} → ${f(Fd.settle.s * 1000, 1)} мм.` : 'Зона не утворюється — основа працює в лінійній стадії, крайові концентрації тиску не виникають.'}`);
     H(2, '3.4. Висновок по фундаменту');
     const uF = Math.max(ss.chk.max, uu.chk.max, Fd.settle.uS, Fd.settle.uT, sl.max || 0);
     P(`Фундамент ${f(fd.B)}×${f(fd.L)}×${f(fd.h)} м з підколонником, бетон ${f(w.Vslab + w.Vped, 2)} м³ ${fd.concrete}, арматура ${f(Fd.rebar.total, 0)} кг (2 сітки + каркас підколонника). Визначає ${ss.chk.max >= uu.chk.max ? 'тиск на ґрунт' : 'стійкість проти перекидання/зсуву'}; найбільший U = ${f(uF, 3)} — ${uF <= 1 ? `запас ${f((1 - uF) * 100, 0)} %` : '<b>не забезпечено</b>'}.`);
@@ -313,7 +339,7 @@
       ['Вітер W (найбільший напрямок θ = ' + Wg.th + '°)', `ΣF = ${kN(Wg.F)} кН; M = ${kN(Wg.M)} кН·м`, `γ<sub>fm</sub> = ${f(c.gfmW, 3)}`, `ΣF = ${kN(Wg.F * c.gfmW)} кН; M = ${kN(Wg.M * c.gfmW)} кН·м`, N.windGammaFm.src, effect('W')],
       ['Сніг S', `${kN(R.cases.S.info.total)} кН`, `γ<sub>fm</sub> = ${f(c.gfmS, 3)}`, `${kN(R.cases.S.info.total * c.gfmS)} кН`, N.snowGammaFm.src, effect('S')],
     ];
-    if (R.cases.I) sum.push(['Ожеледь I', `${kN(R.cases.I.info.total)} кН`, `γ<sub>fm</sub> = ${f((pr.site.ice || {}).gfm || 1, 2)}`, `${kN(R.cases.I.info.total * ((pr.site.ice || {}).gfm || 1))} кН`, N.iceK.src, effect('I')]);
+    if (R.cases.I) sum.push(['Ожеледь I', `${kN(R.cases.I.info.total)} кН`, `γ<sub>fm</sub> = ${f(N.interp(N.iceGammaFm.T, N.iceGammaFm.g, pr.site.Tlife), 3)} (табл. 10.4)`, `${kN(R.cases.I.info.total * N.interp(N.iceGammaFm.T, N.iceGammaFm.g, pr.site.Tlife))} кН`, N.iceK.src, effect('I')]);
     if (R.cases.Tp) sum.push(['Температура ΔT', `+${pr.site.temp.dTplus} / ${pr.site.temp.dTminus} °C`, `γ<sub>f</sub> = ${f(pr.site.temp.gf, 2)}`, `ε = α·ΔT = ${f(N.alphaT * pr.site.temp.dTplus * pr.site.temp.gf * 1e6, 0)}·10⁻⁶`, N.tempMeta.src, effect('T')]);
     if (R.seis) { const V = Math.max(...R.seis.res.map(r => Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))); sum.push(['Сейсміка A (особливе сполучення)', `${pr.site.seismic.intensity} балів, a₀ = ${f(c.seis.a0, 3)}g`, 'γ = 1,0 (особливе)', `V<sub>основи</sub> = ${kN(V)} кН`, N.docs.seismic, effect('A')]); }
     if (R.cases.Q) sum.push(['Обслуговування / монтаж Q', (pr.loadsUser || []).map(l => esc(l.name)).join('; '), 'γ<sub>f</sub> = 1,2', '—', 'ДБН В.1.2-2, р. 6', effect('Q')]);
@@ -355,7 +381,7 @@
       s.push(F().tbl(['Навантаження', 'Тип', 'Точка x; y; z, м', 'F<sub>x</sub>; F<sub>y</sub>; F<sub>z</sub>, кН'], pr.loadsUser.map(l => [esc(l.name), esc(l.kind), `${f(l.x)}; ${f(l.y)}; ${f(l.z)}`, `${f(l.Fx)}; ${f(l.Fy)}; ${f(l.Fz)}`])));
     }
     H(2, '4.9. Розрахункові сполучення');
-    P(`Основні: G + один змінний вплив з повним значенням; G + ψ·(кілька змінних), ψ = ${N.psi.short}; для перекидання й відриву — ${N.gammaG.favourable}·G + W. Особливе: ${N.seismicComb.G}·G + ${N.seismicComb.snow}·S ± E. Усього ${R.combos.length} сполучень ULS і ${R.sls.length} SLS; коефіцієнт відповідальності γ<sub>n</sub> = ${f(pr.site.gammaN, 2)}.`);
+    P(`Основні: G + один змінний вплив з повним значенням; G + кілька змінних за формулою (4.4) ДБН В.1.2-2 (Зміна № 2): основне короткочасне — ψ = 1,0, друге — 0,9, решта — 0,7; перебираються всі варіанти основного й другого впливу; для перекидання й відриву — ${N.gammaG.favourable}·G + W. Особливе: ${N.seismicComb.G}·G + ${N.seismicComb.snow}·S ± E. Усього ${R.combos.length} сполучень ULS і ${R.sls.length} SLS; коефіцієнт відповідальності γ<sub>n</sub> = ${f(pr.site.gammaN, 2)}.`);
     const ld = {}; R.combos.forEach(cb => { ld[cb.lead] = (ld[cb.lead] || 0) + 1; });
     s.push(F().tbl(['Провідний вплив', 'Кількість сполучень', 'Приклад'], Object.entries(ld).map(([k, n]) => [k, n, esc((R.combos.find(cb => cb.lead === k) || {}).name || '')])));
     if (!opt.inner) s.push(sign(R));

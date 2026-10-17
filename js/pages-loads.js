@@ -12,8 +12,8 @@
         ['Власна вага', c.pill('автоматично', 'ok'), 'Геометрія, перерізи, оболонка, ребра, обладнання', R ? `${f((R.cases.G.info.frameMass + R.cases.G.info.shellMass) * 9.81 / 1000, 2)} кН` : '—', 'parts'],
         ['Вітер', pr.site.aero.confirmed ? c.pill('погоджено', 'ok') : c.pill('потребує аеродинаміки', 'warn'), 'ДБН В.1.2-2 р. 9 + C_F частин', R ? `max ΣF ${f(Math.max(...R.cases.W.map(W => W.info.parts.reduce((a, p) => a + p.F, 0))) * R.clim.gfmW / 1000, 2)} кН` : '—', 'wind'],
         ['Сніг', c.pill('автоматично', 'ok'), 'ДБН р. 8, зони накопичення A_h·μ', R ? `${f(R.cases.S.info.total / 1000, 2)} кН (характ.)` : '—', 'snow'],
-        ['Ожеледь', pr.site.ice.on ? c.pill('ручне введення', 'warn') : c.pill('вимкнено'), 'ДБН р. 10: b, k(z), W_B', R && R.cases.I ? `${f(R.cases.I.info.total / 1000, 2)} кН` : '—', 'ice'],
-        ['Температура', pr.site.temp.on ? c.pill('ручне введення', 'warn') : c.pill('вимкнено'), 'ДБН р. 11: ΔT для статично невизначеного ядра', `ΔT = +${pr.site.temp.dTplus} / ${pr.site.temp.dTminus} °C`, 'temp'],
+        ['Ожеледь', pr.site.ice.on ? c.pill(pr.site.ice.mode === 'manual' ? 'ручне введення' : 'Додаток Е', pr.site.ice.mode === 'manual' ? 'warn' : 'ok') : c.pill('вимкнено'), 'ДБН р. 10: b, k(z), W_B, γ табл. 10.4–10.5', R && R.cases.I ? `${f(R.cases.I.info.total / 1000, 2)} кН` : '—', 'ice'],
+        ['Температура', pr.site.temp.on ? c.pill(pr.site.temp.mode === 'manual' ? 'ручне введення' : 'за ДБН р. 11', pr.site.temp.mode === 'manual' ? 'warn' : 'ok') : c.pill('вимкнено'), 'ДБН р. 11: Δt_w, Δt_c за табл. 11.1–11.5', (() => { const tc = pr.site.temp.mode === 'manual' ? { dTw: pr.site.temp.dTplus, dTc: pr.site.temp.dTminus } : c.N.tempClimate(pr.site.temp); return `Δt = +${f(tc.dTw, 1)} / ${f(tc.dTc, 1)} °C`; })(), 'temp'],
         ['Сейсміка', pr.site.seismic.on ? c.pill('модуль увімкнено', 'ok') : c.pill('вимкнено'), 'ДБН В.1.1-12 (спектральний метод)', `${pr.site.seismic.intensity} балів`, 'seismic'],
         ['Обслуговування', (pr.loadsUser || []).some(u => u.kind === 'service') ? c.pill('ручне введення', 'warn') : c.pill('немає'), 'Користувач / експлуатант', `${(pr.loadsUser || []).filter(u => u.kind === 'service').length} шт.`, 'userLoads'],
         ['Монтаж', (pr.loadsUser || []).some(u => u.kind === 'erection') ? c.pill('ручне введення', 'warn') : c.pill('немає'), 'Виробник: схема монтажу, стропування', `${(pr.loadsUser || []).filter(u => u.kind === 'erection').length} шт.`, 'userLoads'],
@@ -41,7 +41,7 @@
       <div class="cols">
       ${card('Характеристичний тиск W₀', `<div class="form">
         ${fld('site.windMode', 'Спосіб визначення', '', { options: [['city', 'За містом (Додаток Е)'], ['district', 'За вітровим районом (рис. 9.1)'], ['value', 'Задати значення / метеостанція']], rerender: true })}
-        ${s.windMode === 'city' ? fld('site.city', 'Місто', '', { options: N.cities.map(x => [x.name, x.name + (x.W0 ? ` — ${x.W0} Па` : ' — W₀ не внесено')]), rerender: true }) : ''}
+        ${s.windMode === 'city' ? fld('site.city', 'Місто', '', { options: N.cities.map(x => [x.name, `${x.name}${x.dbn ? ' (' + x.dbn + ')' : ''} — ${x.W0} Па`]), rerender: true }) : ''}
         ${s.windMode === 'district' ? fld('site.windDistrict', 'Вітровий район', '', { options: N.windDistricts.map(d => [d.id, `${d.id} — ${d.W0} Па`]), rerender: true }) : ''}
         ${fld('site.W0', 'W₀', 'Па', { hint: '10 м, повторюваність 1 раз на 50 років' })}
         ${fld('site.w0Station', 'W₀ — статистика метеостанції (тоді C_alt = 1)', '', { type: 'check' })}
@@ -97,14 +97,13 @@
       <p class="lead">S<sub>m</sub> = γ<sub>fm</sub>·S₀·C, C = μ·C<sub>e</sub>·C<sub>alt</sub> (ДБН В.1.2-2:2006, р. 8). F<sub>s,j</sub> = S<sub>m</sub>·μ<sub>j</sub>·A<sub>h,j</sub> — на горизонтальну проєкцію зони накопичення кожної частини, вертикально вниз.</p>
       <div class="cols">${card('S₀', `<div class="form">
         ${fld('site.snowMode', 'Спосіб визначення', '', { options: [['city', 'За містом (Додаток Е)'], ['district', 'За сніговим районом (рис. 8.1)'], ['value', 'Задати значення']], rerender: true })}
-        ${s.snowMode === 'city' ? fld('site.city', 'Місто', '', { options: N.cities.map(x => [x.name, x.name + (x.S0 ? ` — ${x.S0} Па` : '')]), rerender: true }) : ''}
+        ${s.snowMode === 'city' ? fld('site.city', 'Місто', '', { options: N.cities.map(x => [x.name, `${x.name}${x.dbn ? ' (' + x.dbn + ')' : ''} — ${x.S0} Па`]), rerender: true }) : ''}
         ${s.snowMode === 'district' ? fld('site.snowDistrict', 'Сніговий район', '', { options: N.snowDistricts.map(d => [d.id, `${d.id} — ${d.S0} Па`]), rerender: true }) : ''}
         ${fld('site.S0', 'S₀', 'Па')}
       </div>${fmt.tbl(['Район', 'S₀, Па'], N.snowDistricts.map(d => [d.id, d.S0]))}<p class="note">${N.snowDistrictsMeta.src} ${c.normPill(N.snowDistrictsMeta.status)}</p>`)}
       ${card('Коефіцієнти', `<div class="form">
         ${fld('site.Ce', 'C_e — режим експлуатації', '', { step: 0.05, hint: 'без даних — 1,0' })}
-        ${fld('site.snowRegion', 'Розташування для C_alt', '', { options: [['plain', 'Рівнинна територія'], ['carpathians', 'Карпати: 1,4H + 0,32'], ['crimea', 'Гірський Крим: 2,6H + 0,22']], rerender: true })}
-      </div><p class="note">γ<sub>fm</sub>(T = ${s.Tlife}) = ${f(cl.gfmS, 3)}; C<sub>alt</sub> = ${f(cl.CaltS, 3)}; S<sub>m</sub>(μ = 1) = <b>${f(cl.Sm1, 0)} Па</b>.</p>
+      </div><p class="note">C<sub>alt</sub> = 1,4H + 0,3 при H ≥ 0,5 км; 1 при H < 0,5 км (п. 8.10, ф. 8.5); H = ${f(s.Hsea, 3)} км задається в «Майданчику». Для вершин і перевалів Карпат значення орієнтовне — за наявності снігомірних зйомок S₀ визначається статистично, C<sub>alt</sub> = 1.</p><p class="note">γ<sub>fm</sub>(T = ${s.Tlife}) = ${f(cl.gfmS, 3)}; C<sub>alt</sub> = ${f(cl.CaltS, 3)}; S<sub>m</sub>(μ = 1) = <b>${f(cl.Sm1, 0)} Па</b>.</p>
       <p class="note">μ для схилу: 1 при α ≤ 25°, 0 при α ≥ 60°: ${[0, 30, 40, 50, 60].map(a => `${a}° → ${f(N.snowMuSlope(a), 2)}`).join('; ')}. Зони накопичення на складках плаща, книзі, плечах підтверджує інженер (μ і A<sub>h</sub> — у таблиці частин).</p>`)}</div>`;
     },
   };
@@ -113,30 +112,50 @@
     input: true,
     render(c) {
       const { fld, card, N, state, f, fmt } = c;
-      const ice = state.pr.site.ice;
+      const ice = state.pr.site.ice, T = state.pr.site.Tlife, ct = N.cityByName(state.pr.site.city);
+      const gI = N.interp(N.iceGammaFm.T, N.iceGammaFm.g, T), gW = N.interp(N.iceWindGamma.T, N.iceWindGamma.g, T);
       return `<h2>Ожеледь</h2>
-      <p class="lead">Для тонких виносів і холодного клімату (ТЗ 2.4.2). Вага шару на поверхнях i = b·k(z)·μ₂·ρ·g, ρ = 900 кг/м³, μ₂ = 0,6; вітер з ожеледдю — тиск W<sub>B</sub> з Додатка Е.</p>
+      <p class="lead">ДБН В.1.2-2:2006, р. 10. Поверхневе ожеледне навантаження G<sub>e</sub> = b·k·μ₂·ρ·g (10.3), μ₂ = 0,6, ρ = 900 кг/м³; граничне G<sub>m</sub> = γ<sub>fm</sub>·G<sub>e</sub>, γ<sub>fm</sub> — табл. 10.4. Тиск вітру на вкриті ожеледдю елементи — за (9.1), (9.3) з W<sub>B</sub> замість W₀ і C<sub>rel</sub> = C<sub>dir</sub> = C<sub>d</sub> = 1 (п. 10.9), γ<sub>fw</sub> — табл. 10.5. ${c.esc(N.iceMeta.need)}.</p>
       ${card('Параметри', `<div class="form">
         ${fld('site.ice.on', 'Враховувати ожеледь', '', { type: 'check' })}
-        ${fld('site.ice.b', 'Товщина стінки ожеледі b (Додаток Е; Київ — 19)', 'мм', { step: 1 })}
-        ${fld('site.ice.WB', 'Вітровий тиск при ожеледі W_B (Київ — 160)', 'Па', { step: 10 })}
-        ${fld('site.ice.gfm', 'γ_fm ожеледі', '', { step: 0.05 })}
-      </div>${fmt.tbl(['z, м', ...N.iceK.z], [['k', ...N.iceK.k.map(k => f(k, 2))]])}<p class="note">${N.iceK.src} ${c.normPill(N.iceK.status)}. Для z = 5 м: i = ${f(ice.b / 1000 * 0.8 * 0.6 * 900 * 9.81, 1)} Па.</p>`)}`;
+        ${fld('site.ice.mode', 'Джерело b і W_B', '', { options: [['city', 'За містом (Додаток Е)'], ['manual', 'Задати вручну (карти рис. 10.1, 10.2)']], rerender: true })}
+        ${fld('site.ice.b', 'Товщина стінки ожеледі b', 'мм', { step: 1 })}
+        ${fld('site.ice.WB', 'Вітровий тиск при ожеледі W_B', 'Па', { step: 10 })}
+      </div>
+      <p class="note">${ice.mode !== 'manual' && ct ? `За Додатком Е для «${c.esc(ct.name)}»: b = ${ct.b} мм, W<sub>B</sub> = ${ct.WB} Па (підставляються автоматично).` : 'Значення з карт районування.'} γ<sub>fm</sub>(T = ${T}) = <b>${f(gI, 3)}</b> (табл. 10.4); γ<sub>fw</sub> = <b>${f(gW, 3)}</b> (табл. 10.5).</p>
+      ${fmt.tbl(['h, м', ...N.iceK.z], [['k (табл. 10.2)', ...N.iceK.k.map(k => f(k, 2))]])}
+      ${fmt.tbl(['Район (рис. 10.1)', ...N.iceDistricts.map(d => d.id)], [['b, мм', ...N.iceDistricts.map(d => d.b)]])}
+      ${fmt.tbl(['Район (рис. 10.2)', ...N.iceWindDistricts.map(d => d.id)], [['W_B, Па', ...N.iceWindDistricts.map(d => d.WB)]])}
+      <p class="note">${N.iceK.src} ${c.normPill(N.iceK.status)}. Для h = 10 м: G<sub>e</sub> = ${f(ice.b / 1000 * 1.0 * 0.6 * 900 * 9.81, 1)} Па, G<sub>m</sub> = ${f(gI * ice.b / 1000 * 0.6 * 900 * 9.81, 1)} Па.</p>`)}`;
     },
   };
 
   P.temp = {
     input: true,
     render(c) {
-      const { fld, card, N } = c;
-      return `<h2>Температурні впливи</h2>
-      <p class="lead">Рівномірна зміна температури ΔT для статично невизначеного ядра з поясами й жорсткими вузлами: початкова деформація ε₀ = α·ΔT кожного стрижня, α = 1,2·10⁻⁵ 1/°C. Для одиночної консольної стійки зусиль не викликає. Нерівномірне сонячне нагрівання оболонки — зовнішнє дослідження.</p>
+      const { fld, card, N, state, f, fmt } = c;
+      const t = state.pr.site.temp, tc = N.tempClimate(t);
+      return `<h2>Температурні кліматичні впливи</h2>
+      <p class="lead">ДБН В.1.2-2:2006, р. 11. Рівномірна зміна температури каркаса задається як початкова деформація стрижнів ε₀ = α·Δt, α = 1,2·10⁻⁵ 1/°C. Для статично невизначеного ядра із защемленою базою вона викликає зусилля; для консольної стійки — лише переміщення.</p>
       ${card('Параметри', `<div class="form">
         ${fld('site.temp.on', 'Враховувати температуру', '', { type: 'check' })}
-        ${fld('site.temp.dTplus', 'ΔT₊ (нагрівання відносно замикання)', '°C', { step: 1 })}
-        ${fld('site.temp.dTminus', 'ΔT₋ (охолодження)', '°C', { step: 1 })}
-        ${fld('site.temp.gf', 'γ_f', '', { step: 0.05 })}
-      </div><p class="note">${N.tempMeta.src} ${c.normPill(N.tempMeta.status)}</p>`)}`;
+        ${fld('site.temp.mode', 'Визначення Δt', '', { options: [['dbn', 'За ДБН (табл. 11.1–11.5)'], ['manual', 'Задати вручну']], rerender: true })}
+        ${t.mode !== 'manual' ? fld('site.temp.exposure', 'Каркас', '', { options: [['sun', 'не захищений від сонця (оболонка нагрівається; у запас)'], ['shade', 'захищений від сонця (внутрішній)']], rerender: true }) : ''}
+        ${t.mode !== 'manual' && t.exposure !== 'shade' ? fld('site.temp.rho', 'ρ — коеф. поглинання сонячної радіації поверхні', '', { step: 0.05, hint: 'темна бронза, патина, темна фарба 0,7…0,9; світла фарба 0,4…0,5' }) : ''}
+        ${t.mode !== 'manual' && t.exposure !== 'shade' ? fld('site.temp.surface', 'Поверхня', '', { options: [['horizontal', 'горизонтальна (S = 890 Вт/м², k = 1,0)'], ['south', 'вертикальна південна (540; 1,0)'], ['west', 'вертикальна західна (780; 0,9)'], ['east', 'вертикальна східна (780; 0,7)']], rerender: true }) : ''}
+        ${t.mode === 'manual' ? fld('site.temp.dTplus', 'Δt_w (нагрівання)', '°C', { step: 1 }) + fld('site.temp.dTminus', 'Δt_c (охолодження)', '°C', { step: 1 }) : ''}
+        ${fld('site.temp.gf', 'γ_fm (п. 11.8 — 1,1)', '', { step: 0.05 })}
+      </div>
+      ${t.mode !== 'manual' ? fmt.tbl(['Величина', 'Формула', 'Значення'], [
+        ['t_ew; t_ec', 'п. 11.5', `${tc.tew} °C; ${tc.tec} °C`],
+        ['θ₁', 'табл. 11.2 (метал)', `${tc.th1} °C`],
+        ['θ₄', tc.sun ? `0,05·ρ·S<sub>max</sub>·k·k₁ = 0,05·${f(tc.rho, 2)}·${tc.Smax}·${f(tc.k, 1)}·${f(tc.k1, 1)} (11.3)` : 'захищений — 0', `${f(tc.th4, 1)} °C`],
+        ['t_w', tc.sun ? 't_ew + θ₁ + θ₄ (табл. 11.1)' : 't_ew', `${f(tc.tw, 1)} °C`],
+        ['t_c', tc.sun ? 't_ec − 0,5θ₁' : 't_ec', `${f(tc.tc, 1)} °C`],
+        ['Δt_w', `t_w − t_0c, t_0c = ${tc.t0c} °C (11.1)`, `<b>+${f(tc.dTw, 1)} °C</b>`],
+        ['Δt_c', `t_c − t_0w, t_0w = ${tc.t0w} °C (11.2)`, `<b>${f(tc.dTc, 1)} °C</b>`],
+      ]) : ''}
+      <p class="note">${N.tempMeta.src} ${c.normPill(N.tempMeta.status)}</p>`)}`;
     },
   };
 
@@ -199,7 +218,7 @@
       const list = R.combos.filter(cb => !flt || cb.id.startsWith(flt) || String(cb.theta) === flt);
       const ulsU = id => Math.max(0, ...R.memberRes.map(m => (m.byCombo.find(x => x.id === id) || { u: 0 }).u));
       return `<h2>Сполучення навантажень</h2>
-      <p class="lead">Основні сполучення ДБН В.1.2-2: постійне + одне змінне (ведуче) з повним значенням; постійне + кілька змінних з ψ = ${c.N.psi.short} для супутніх. Розрахунок виконується за повними наборами зусиль кожного сполучення — штучних сполучень з незалежних максимумів не створюється (ТЗ 2.1, 4).</p>
+      <p class="lead">Основні сполучення ДБН В.1.2-2: постійне + одне змінне (ведуче) з повним значенням; постійне + кілька змінних за формулою (4.4) ДБН В.1.2-2 (Зміна № 2): основне короткочасне — ψ = 1,0, друге — 0,9, решта — 0,7; перебираються всі варіанти основного й другого впливу. Розрахунок виконується за повними наборами зусиль кожного сполучення — штучних сполучень з незалежних максимумів не створюється (ТЗ 2.1, 4).</p>
       ${c.staleBanner()}
       ${card('Перелік', `<div class="row"><label>Фільтр <select id="comboF"><option value="">усі (${R.combos.length})</option>${['C', 'I', 'T', 'Q', 'W', 'SW', 'U', 'IW', 'M', 'A'].map(p => `<option value="${p}" ${flt === p ? 'selected' : ''}>${p}…</option>`).join('')}</select></label></div>` +
         fmt.tbl(['Код', 'Ситуація', 'Склад сполучення', 'Ведучий', 'Супутні', 'φ недоскон., ‰', 'max U каркаса'], list.map(cb => [cb.id, cb.situation, esc(cb.name), cb.lead || '—', (cb.acc || []).join(', ') || '—', f((cb.phi || 0) * 1000, 2), fmt.U(ulsU(cb.id))])))}

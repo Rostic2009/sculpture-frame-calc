@@ -109,10 +109,11 @@
       ${card('Документи нормативного профілю', `<ul>${Object.values(N.docs).map(d => `<li>${c.esc(d)}</li>`).join('')}</ul>`)}
       <div class="cols">${card('C<sub>h</sub>, табл. 9.01 (T ≤ 0,25 с) ' + c.normPill('checked'), chTable('9.01') + `<p class="note">${N.ChTables['9.01'].src}</p>`)}${card('C<sub>h</sub>, табл. 9.02 (T > 0,25 с) ' + c.normPill('checked'), chTable('9.02') + `<p class="note">${N.ChTables['9.02'].src}. Значення для типу IV на 60 м — ввести з офіційного тексту.</p>`)}</div>
       <div class="cols">${card('γ<sub>fm</sub> вітру ' + c.normPill(N.windGammaFm.status), fmt.tbl(['T, р.', ...N.windGammaFm.T], [['γfm', ...N.windGammaFm.g.map(g => f(g, 2))]]) + `<p class="note">${N.windGammaFm.src}</p>`)}${card('γ<sub>fm</sub> снігу ' + c.normPill(N.snowGammaFm.status), fmt.tbl(['T, р.', ...N.snowGammaFm.T], [['γfm', ...N.snowGammaFm.g.map(g => f(g, 2))]]) + `<p class="note">${N.snowGammaFm.src}</p>`)}</div>
-      ${card('Міста (Додаток Е) — лише значення з відкритих фрагментів', fmt.tbl(['Місто', 'W₀, Па', 'S₀, Па', 'Статус'], N.cities.map(x => [x.name, x.W0 || '—', x.S0 || '—', c.normPill(x.status)])))}
+      ${card('Міста — Додаток Е ДБН В.1.2-2 (164 міста, повна таблиця)', fmt.tbl(['Місто', 'Область', 'W₀, Па', 'S₀, Па', 'b, мм', 'W_B, Па'], N.cities.map(x => [x.name + (x.dbn ? ` <small>(${x.dbn})</small>` : ''), x.obl, x.W0, x.S0, x.b, x.WB])))}
       ${card('Інші коефіцієнти', fmt.tbl(['Параметр', 'Значення', 'Джерело', 'Статус'], [
         ['γ_fm власної ваги (метал/бетон/ґрунт/сприятлива)', `${N.gammaG.steel} / ${N.gammaG.concrete} / ${N.gammaG.soil} / ${N.gammaG.favourable}`, N.gammaG.src, c.normPill(N.gammaG.status)],
-        ['ψ для супутніх короткочасних', N.psi.short, N.psi.src, c.normPill(N.psi.status)],
+        ['ψ короткочасних: основне / друге / решта', N.psi.short.join(' / '), N.psi.src, c.normPill(N.psi.status)],
+        ['γ_fm ожеледі / γ_fw вітру при ожеледі (T = 100 р.)', `${N.interp(N.iceGammaFm.T, N.iceGammaFm.g, 100)} / ${N.interp(N.iceWindGamma.T, N.iceWindGamma.g, 100)}`, N.iceGammaFm.src + '; ' + N.iceWindGamma.src, c.normPill('checked')],
         ['Особливе сполучення G / S', `${N.seismicComb.G} / ${N.seismicComb.snow}`, N.seismicComb.src, c.normPill(N.seismicComb.status)],
         ['a₀ за бальністю 6/7/8/9', `${N.seismicA0[6]} / ${N.seismicA0[7]} / ${N.seismicA0[8]} / ${N.seismicA0[9]} g`, N.seismicA0Meta.src, c.normPill(N.seismicA0Meta.status)],
         ['k(z) ожеледі, μ₂, ρ', '0,8…1,7; 0,6; 900 кг/м³', N.iceK.src, c.normPill(N.iceK.status)],

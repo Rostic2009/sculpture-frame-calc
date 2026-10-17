@@ -45,7 +45,32 @@
   };
 
   /** Осідання центру фундаменту (м) і крен. pmean — середній тиск (Па) під підошвою від SLS; M — момент на підошві (Н·м). */
-  C.settlement = function (fd, pmean, Mx, My) {
+  /**
+   * Глибина зони руйнування («прорізки») ґрунту під краєм підошви — В.А. Барвашов (НИИОСП), на основі розв'язку
+   * Н.П. Пузиревського при K₀ = 1: H₀ = (p − γh)·(ctgφ + φ − π/2)/(πγ) − c/(γ·tgφ) − h; H₀ ≤ 0 → зони немає.
+   * p — крайовий тиск, кПа; γ — кН/м³; c — кПа; h — заглиблення. Для шаруватої основи береться найгірший шар,
+   * у який потрапляє «руйнуюча» точка. У межах H₀ ґрунт працює в умовах компресії (тиск не розподіляється).
+   */
+  C.edgeZone = function (fd, pEdge) {
+    const layers = (fd.layers && fd.layers.length) ? fd.layers : [{ name: 'ґрунт', h: 10, gamma: fd.gammaSoil || 18, phi: fd.phi, c: fd.cII }];
+    const h = fd.depth, p = pEdge / 1000;
+    let best = { H0: 0, layer: null };
+    const H0of = L => {
+      const g = L.gamma || 18, ph = Math.max(1, L.phi || fd.phi || 20) * Math.PI / 180, c = L.c != null ? L.c : (fd.cII || 0);
+      return (p - g * h) * (1 / Math.tan(ph) + ph - Math.PI / 2) / (Math.PI * g) - c / (g * Math.tan(ph)) - h;
+    };
+    let top = 0;
+    for (const L of layers) {
+      const bot = top + L.h;
+      if (bot > h) { const H0 = H0of(L); if (H0 > best.H0 && h + H0 > Math.max(top, h) - 1e-9) best = { H0, layer: L.name }; if (h + Math.max(0, H0) <= bot) break; }
+      top = bot;
+    }
+    best.H0 = Math.max(0, best.H0); best.p = p;
+    return best;
+  };
+
+  C.settlement = function (fd, pmean, Mx, My, opts) {
+    const H0 = (opts && opts.H0) || 0;
     const layers = (fd.layers && fd.layers.length) ? fd.layers : [{ name: 'ґрунт', h: 10, gamma: fd.gammaSoil || 18, E: fd.Esoil || 15, nu: 0.3 }];
     const gwl = fd.gwl != null ? fd.gwl : 99;
     const d = fd.depth, b = Math.min(fd.B, fd.L);
@@ -57,7 +82,7 @@
     let s = 0, z = 0, Hc = 0;
     for (let k = 0; k < 400; k++) {
       const zm = z + dz / 2;
-      const a = C.alphaCenter(fd.B, fd.L, zm);
+      const a = zm < H0 ? 1 : C.alphaCenter(fd.B, fd.L, zm - H0); // у зоні «прорізки» — компресія без розподілу (Барвашов)
       const szp = a * p0;
       const szg = C.sigmaZg(layers, gwl, d + zm);
       const L = C.layerAt(layers, d + zm);
