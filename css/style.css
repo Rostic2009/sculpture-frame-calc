@@ -207,3 +207,7 @@ textarea { background: var(--bg); border: 1px solid var(--line); border-radius: 
 .dropzone p { margin: 0; }
 .file-input { font-size: 13px; max-width: 100%; }
 #app-root { min-height: 100%; }
+
+.sect-chip { display: inline-block; color: #fff; font: 600 12px/1.6 var(--font-mono); padding: 0 7px; border-radius: 4px; vertical-align: 1px; }
+.bad-t { color: var(--bad); }
+.dwg text[paint-order] { stroke: var(--surface); }

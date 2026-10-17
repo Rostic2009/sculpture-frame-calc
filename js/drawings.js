@@ -110,12 +110,92 @@
     return svg(W, H, b, 'Фундамент');
   };
 
+  /**
+   * 2D-креслення розрахункової секції з марками стрижнів і номерами вузлів.
+   *  Ярус ядра — розгортка граней між сусідніми стійками (кожен стрижень видно без накладання);
+   *  консоль — вертикальна площина, що містить консоль; інші — фасад XZ.
+   *  Колір лінії — коефіцієнт використання U (якщо є розрахунок), рамка заголовка — колір секції.
+   */
+  D.section = function (mdl, sc, R) {
+    const nodes = R ? R.P.model.nodes : mdl.nodes;
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const elems = mdl.elems.filter(e => e.sect === sc.code);
+    const uOf = new Map(R ? R.memberRes.map(m => [m.e.id, m.best.u]) : []);
+    const cls = e => { const u = uOf.get(e.id); return 'mb' + (e.type === 'truss' ? ' br' : '') + (u > 1 ? ' bad' : u > 0.9 ? ' warn' : ''); };
+    const Lm = e => { const a = byId.get(e.i), b = byId.get(e.j); return Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z); };
+    const head = (W) => `<rect x="0" y="0" width="${W}" height="26" fill="${sc.color}"/>` + `<text x="10" y="17" fill="#fff" font-weight="600" font-size="13">${sc.code} · ${sc.name}</text>`;
+    const nodeMark = (x, y, n) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" class="sup"/>` + text(x - 5, y + 13, n.num, 'end', 'dt');
+    const label = (x, y, t) => `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" class="tx sm" font-weight="600" text-anchor="middle" paint-order="stroke" stroke="var(--surface)" stroke-width="3">${t}</text>`;
+    let b = '', W, H;
+    if (sc.kind === 'tier' && sc.faces && sc.faces.length) {
+      const faces = sc.faces.map(fc => {
+        const [A, B, C, Dn] = fc.nodes.map(id => byId.get(id));
+        const ex = B.x - A.x, ey = B.y - A.y, l = Math.hypot(ex, ey) || 1;
+        const uv = p => [((p.x - A.x) * ex + (p.y - A.y) * ey) / l, p.z - sc.z0];
+        const set = new Set(fc.nodes);
+        return { fc, A, B, C, Dn, uv, l, els: elems.filter(e => set.has(e.i) && set.has(e.j)), umin: Math.min(0, uv(Dn)[0], uv(C)[0]), umax: Math.max(l, uv(Dn)[0], uv(C)[0]) };
+      });
+      const fw = Math.max(...faces.map(f => f.umax - f.umin)), fh = sc.z1 - sc.z0;
+      const s = Math.min(150 / Math.max(fw, 0.2), 230 / Math.max(fh, 0.2));
+      const cellW = fw * s + 90; W = Math.max(520, 80 + cellW * faces.length); H = fh * s + 120;
+      faces.forEach((F, k) => {
+        const ox = 80 + k * cellW - F.umin * s, oy = H - 50;
+        const X = p => ox + F.uv(p)[0] * s, Y = p => oy - F.uv(p)[1] * s;
+        b += line(X(F.A), Y(F.A), X(F.B), Y(F.B), 'gr');
+        let bi = 0;
+        F.els.forEach(e => {
+          const a = byId.get(e.i), c = byId.get(e.j);
+          b += line(X(a), Y(a), X(c), Y(c), cls(e));
+          const t = e.role === 'brace' ? (bi++ % 2 ? 0.7 : 0.3) : 0.5;
+          let lx = X(a) + (X(c) - X(a)) * t, ly = Y(a) + (Y(c) - Y(a)) * t;
+          if (e.role === 'post') lx += (F.uv(a)[0] < F.l / 2 ? -22 : 22); else if (e.role === 'ring') ly -= 7;
+          b += label(lx, ly + 3, e.mark);
+        });
+        F.fc.nodes.forEach(id => { const n = byId.get(id); b += nodeMark(X(n), Y(n), n); });
+        b += text(ox + F.umin * s + (fw * s) / 2, 44, F.fc.name, 'middle', 'tx sm');
+        b += dim(X(F.A), oy + 10, X(F.B), oy + 10, f(F.l * 1000) + ' мм', 6);
+        if (k === 0) b += dim(X(F.A) - 40, oy, X(F.A) - 40, oy - fh * s, f(fh * 1000) + ' мм', -12);
+      });
+    } else if (sc.kind === 'cant' && elems.length) {
+      const e = elems[0], a = byId.get(e.i), c = byId.get(e.j);
+      const r = Math.hypot(c.x - a.x, c.y - a.y), dz = c.z - a.z, L = Lm(e);
+      const s = Math.min(330 / Math.max(r, 0.2), 200 / Math.max(Math.abs(dz), 0.2), 160);
+      W = 520; H = Math.max(200, Math.abs(dz) * s + 130);
+      const ox = 80, oy = dz >= 0 ? H - 50 : 70;
+      const X = u => ox + u * s, Y = v => oy - v * s;
+      b += line(X(0), Y(-0.6), X(0), Y(Math.max(dz, 0) + 0.6), 'gr') + text(X(0) - 6, Y(Math.max(dz, 0) + 0.6) + 12, 'вісь ядра', 'end', 'dt');
+      b += line(X(0), Y(0), X(r), Y(dz), cls(e)) + label(X(r / 2), Y(dz / 2) - 6, e.mark);
+      b += nodeMark(X(0), Y(0), a) + nodeMark(X(r), Y(dz), c);
+      b += `<circle cx="${X(r).toFixed(1)}" cy="${Y(dz).toFixed(1)}" r="7" fill="none" stroke="${sc.color}" stroke-width="2"/>`;
+      b += dim(X(0), Math.max(Y(0), Y(dz)) + 14, X(r), Math.max(Y(0), Y(dz)) + 14, 'винос ' + f(r * 1000) + ' мм', 8);
+      if (Math.abs(dz) > 0.02) b += dim(X(r) + 16, Y(0), X(r) + 16, Y(dz), 'Δz ' + f(dz * 1000), 8);
+      b += text(X(r) + 50, Y(dz) + 4, `L = ${f(L * 1000)} мм, кут ${f(Math.atan2(dz, r) * 180 / Math.PI, 0)}°`, 'start', 'tx sm');
+    } else {
+      const xs = [], zs = []; elems.forEach(e => [e.i, e.j].forEach(id => { const n = byId.get(id); xs.push(n.x); zs.push(n.z); }));
+      const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+      const s = Math.min(380 / Math.max(x1 - x0, 0.3), 260 / Math.max(z1 - z0, 0.3));
+      W = 520; H = (z1 - z0) * s + 110;
+      const X = v => 70 + (v - x0) * s, Y = v => H - 45 - (v - z0) * s;
+      elems.forEach(e => { const a = byId.get(e.i), c = byId.get(e.j); b += line(X(a.x), Y(a.z), X(c.x), Y(c.z), cls(e)) + label((X(a.x) + X(c.x)) / 2 + 14, (Y(a.z) + Y(c.z)) / 2, e.mark); });
+      const seen = new Set(); elems.forEach(e => [e.i, e.j].forEach(id => { if (seen.has(id)) return; seen.add(id); const n = byId.get(id); b += nodeMark(X(n.x), Y(n.z), n); }));
+      if (z1 - z0 > 0.01) b += dim(40, Y(z0), 40, Y(z1), f((z1 - z0) * 1000) + ' мм', -8);
+    }
+    return svg(W, H, head(W) + b, 'Секція ' + sc.code);
+  };
+
   /** DXF (R12, ASCII): лінії каркаса (3D), контури плит і фундаменту. */
+  // DXF R12 — кодування ANSI: марки транслітеруються (Я2-Р3 → YA2-R3)
+  const TR = { Я: 'YA', К: 'K', Д: 'D', С: 'S', Р: 'R', П: 'P' };
+  const tr = t => String(t).replace(/[ЯКДСРП]/g, c => TR[c]);
   D.dxf = function (R) {
     const L = [];
     const ln = (layer, a, b) => L.push('0', 'LINE', '8', layer, '10', a[0], '20', a[1], '30', a[2], '11', b[0], '21', b[1], '31', b[2]);
     const byId = new Map(R.P.model.nodes.map(n => [n.id, n]));
-    R.mdl.elems.forEach(e => { const a = byId.get(e.i), b = byId.get(e.j); ln(e.type === 'truss' ? 'BRACES' : 'FRAME', [a.x, a.y, a.z], [b.x, b.y, b.z]); });
+    R.mdl.elems.forEach(e => {
+      const a = byId.get(e.i), b = byId.get(e.j), lay = 'SECT_' + tr(e.sect || (e.type === 'truss' ? 'BRACES' : 'FRAME'));
+      ln(lay, [a.x, a.y, a.z], [b.x, b.y, b.z]);
+      if (e.mark) L.push('0', 'TEXT', '8', 'MARKS', '10', (a.x + b.x) / 2, '20', (a.y + b.y) / 2, '30', (a.z + b.z) / 2, '40', 0.04, '1', tr(e.mark));
+    });
     const fd = R.found.fd, zb = -(fd.pedH + fd.h);
     const box = (layer, x0, y0, x1, y1, z) => { ln(layer, [x0, y0, z], [x1, y0, z]); ln(layer, [x1, y0, z], [x1, y1, z]); ln(layer, [x1, y1, z], [x0, y1, z]); ln(layer, [x0, y1, z], [x0, y0, z]); };
     box('FOUNDATION', -fd.B / 2, -fd.L / 2, fd.B / 2, fd.L / 2, zb);

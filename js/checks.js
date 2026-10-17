@@ -62,7 +62,7 @@
     const sN = f.N / sec.A, sM = My / sec.Wel + Mz / sec.Wel;
     const tau = V / sec.Av + T / sec.Wt;
     const sig = Math.abs(sN) + sM;
-    res.dbn.Ry = Ry; res.dbn.lam = lam; res.dbn.lamBar = lamBar; res.dbn.phi = phi;
+    res.dbn.Ry = Ry; res.dbn.lam = lam; res.dbn.lamBar = lamBar; res.dbn.phi = phi; res.dbn.sig = sig; res.dbn.tau = tau; res.dbn.Rs = Rs; res.dbn.gc = gc;
     res.dbn.strength = sig / (Ry * gc);
     res.dbn.shear = tau / (Rs * gc);
     res.dbn.eq = Math.sqrt(sig * sig + 3 * tau * tau) / (1.15 * Ry * gc); // ДБН: σef ≤ 1,15·Ry·γc

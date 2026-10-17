@@ -143,7 +143,11 @@
         <fieldset class="checklist"><legend>Перед передаванням у розрахунок підтвердіть (ТЗ, 9 «Людина в контурі»):</legend>${checklist.map(([k, l]) => `<label class="mini"><input type="checkbox" data-vcheck="${k}" ${cl[k] ? 'checked' : ''}> ${l}</label>`).join('')}</fieldset>
         <div class="row"><button class="btn" data-act="visBuild">Побудувати 3D-модель</button><button class="btn primary" data-act="visApply">Передати частини в розрахунок</button></div>
         ${c.state.ui.visionBuild ? `<p class="note">Побудовано: ${c.state.ui.visionBuild.parts.length} частин. Перегляд — у розділі <a href="#" data-tab="model3d">3D-модель</a>.</p>` : ''}
-        ${(c.state.ui.visionIssues || []).length ? `<ul class="warns">${c.state.ui.visionIssues.map(t => `<li class="warn">${esc(t)}</li>`).join('')}</ul>` : ''}`)}`;
+        ${(c.state.ui.visionIssues || []).length ? `<ul class="warns">${c.state.ui.visionIssues.map(t => `<li class="warn">${esc(t)}</li>`).join('')}</ul>` : ''}`)}${pr.vision.analysis ? `<section class="card"><h3>5. Аналіз зображення і пропозиція каркаса</h3>
+        <ul class="concl">${pr.vision.analysis.text.map(t => `<li>${c.esc(t)}</li>`).join('')}</ul>
+        ${pr.vision.analysis.cants.length ? c.fmt.tbl(['Винесена частина', 'Тип', 'Винос у плані, мм', 'Висота центру, м', 'Переріз консолі'], pr.vision.analysis.cants.map(ct => [c.esc(ct.name), ct.vertical ? 'над ядром' : 'винос', Math.round(ct.r * 1000), c.f(ct.z, 2), ct.sec])) : ''}
+        <p class="note">Аналіз виконано в браузері детермінованими правилами (без API): габарити й профіль оболонки по висоті з масок і масштабу, центр поверхні, виноси. Пропозиція застосовується разом із кнопкою «Передати частини в розрахунок»; її можна змінити в розділі «Схема і генерація».</p>
+        <div class="row"><button class="btn" data-act="visFrame">Застосувати лише каркас</button></div></section>` : ''}`;
     },
     after(c) {
       const drop = document.getElementById('content');
@@ -226,6 +230,7 @@
         case 'visOCR': runOCR(c); return true;
         case 'visBuild': build(c); return true;
         case 'visApply': apply(c); return true;
+        case 'visFrame': applyFrame(c, proj()); c.changed('каркас', '', 'за аналізом зображення'); c.render(); return true;
       }
       return false;
     },
@@ -399,13 +404,25 @@
       const iou = V.iouFront(r.tris, front, lab);
       if (iou < 0.85) issues.push(`Частина «${p.name}»: збіг силуету IoU = ${iou.toFixed(2)} < 0,85 — перевірте маску.`);
       if (p.vis && side && /не видима|припущена/.test(p.vis[sd.v.id] || '')) issues.push(`Частина «${p.name}» на боковому ракурсі: ${p.vis[sd.v.id]} — глибина не підтверджена.`);
-      parts.push({ id: p.id, name: p.name, shape: p.shape, kind: p.kind, H: r.zTop - r.zBot, z1: r.zBot, z2: r.zTop, area: p.shape === 'sheet' ? an.area : an.area, Ax: an.Ax, Ay: an.Ay, Ah: an.Ah, areaTable: an.areaTable, c: an.centroid, iou, assumed: r.assumed || (p.vis && sd && /не видима|припущена/.test(p.vis[sd.v.id] || '')) });
+      parts.push({ id: p.id, name: p.name, shape: p.shape, kind: p.kind, H: r.zTop - r.zBot, z1: r.zBot, z2: r.zTop, area: an.area, prof: r.prof, Ax: an.Ax, Ay: an.Ay, Ah: an.Ah, areaTable: an.areaTable, c: an.centroid, iou, assumed: r.assumed || (p.vis && sd && /не видима|припущена/.test(p.vis[sd.v.id] || '')) });
       for (const t of r.tris) allTris.push(t);
     });
     // габарит (вся скульптура): контроль розмірів-габаритів
-    c.state.ui.visionBuild = { parts, tris: Float64Array.from(allTris), scale: sF.scale };
+    const analysis = V.describe(parts, { clear: (pr.shell.clear || 80) / 1000 });
+    c.state.ui.visionBuild = { parts, tris: Float64Array.from(allTris), scale: sF.scale, analysis };
+    if (analysis) pr.vision.analysis = { text: analysis.text, frame: analysis.frame, cants: analysis.cants, date: new Date().toISOString().slice(0, 10) };
     c.state.ui.visionIssues = issues;
     c.toast(`3D побудовано: ${parts.length} частин.`); c.render();
+  }
+
+  /** Застосувати запропоновану аналізом схему каркаса (з записом у журнал). */
+  function applyFrame(c, pr) {
+    const A = pr.vision.analysis; if (!A) return;
+    const fr = pr.frame, old = `${fr.type}, ${fr.a}×${fr.b}→${fr.aTop}×${fr.bTop}, рівні ${fr.levels.join('; ')}`;
+    Object.assign(fr, { type: A.frame.type, a: A.frame.a, b: A.frame.b, aTop: A.frame.aTop, bTop: A.frame.bTop, levels: A.frame.levels.slice(), bracing: A.frame.bracing, secPost: A.frame.secPost, secRing: A.frame.secRing, secBrace: A.frame.secBrace });
+    (pr.parts || []).forEach(p => { const ct = A.cants.find(x => x.name === p.name); if (ct && p.kind === 'cant') p.sec = ct.sec; });
+    c.logChange('каркас за аналізом зображення', old, `${fr.type}, ${fr.a}×${fr.b}→${fr.aTop}×${fr.bTop}, рівні ${fr.levels.join('; ')}`);
+    c.toast(`Каркас створено за аналізом: ${fr.type === 'single' ? 'одна стійка' : 'ядро ' + fr.a + '×' + fr.b + ' м'}, ${fr.levels.length - 1} ярусів. Перегляньте «Секції каркаса».`);
   }
 
   function apply(c) {
@@ -427,14 +444,17 @@
         source: 'image', status: p.assumed ? 'assumed' : 'confirmed',
       };
     });
-    // рівні ядра під висоту тулуба: верх ядра — верх «розподілених» частин, крок ≈ 1,5 м
-    const dist = pr.parts.filter(p => p.kind === 'dist');
-    const zTop = dist.length ? Math.max(...dist.map(p => p.z2)) : Math.max(...pr.parts.map(p => p.z));
-    const n = Math.max(2, Math.round(zTop / 1.5));
-    const oldLv = pr.frame.levels.join('; ');
-    pr.frame.levels = Array.from({ length: n + 1 }, (_, i) => +(zTop * i / n).toFixed(2));
-    c.logChange('рівні ядра', oldLv, pr.frame.levels.join('; '));
-    c.toast(`Рівні ядра підігнано під скульптуру: ${pr.frame.levels.join('; ')} м. Перевірте в розділі «Каркас».`);
+    if (pr.vision.analysis) applyFrame(c, pr);
+    else {
+      // рівні ядра під висоту тулуба: верх ядра — верх «розподілених» частин, крок ≈ 1,5 м
+      const dist = pr.parts.filter(p => p.kind === 'dist');
+      const zTop = dist.length ? Math.max(...dist.map(p => p.z2)) : Math.max(...pr.parts.map(p => p.z));
+      const n = Math.max(2, Math.round(zTop / 1.5));
+      const oldLv = pr.frame.levels.join('; ');
+      pr.frame.levels = Array.from({ length: n + 1 }, (_, i) => +(zTop * i / n).toFixed(2));
+      c.logChange('рівні ядра', oldLv, pr.frame.levels.join('; '));
+      c.toast(`Рівні ядра підігнано під скульптуру: ${pr.frame.levels.join('; ')} м. Перевірте в розділі «Каркас».`);
+    }
     c.changed('частини', `${old.length} шт.`, `${pr.parts.length} шт. із зображень`);
     c.go('parts');
   }

@@ -123,7 +123,8 @@
 
   // ---------------- МІСТА (лише значення, підтверджені у відкритих фрагментах Додатка Е) ----------------
   N.cities = [
-    { name: 'Київ', W0: 370, S0: 1550, status: 'checked' },
+    { name: 'Київ', W0: 370, S0: 1550, b: 19, WB: 160, status: 'checked' },
+    { name: 'Севастополь', W0: 460, S0: 770, b: 13, WB: 250, status: 'checked' },
     { name: 'Дніпро', W0: 470, S0: 1340, status: 'checked' },
     { name: 'Вінниця', W0: null, S0: 1360, status: 'verify' },
     { name: 'Донецьк', W0: null, S0: 1500, status: 'verify' },
@@ -219,6 +220,61 @@
     { id: 'C5', name: 'C5 — дуже висока', loss: 0.2 },
   ];
   N.corrMeta = { src: 'ДСТУ ISO 12944-2 / EN ISO 9223: втрата товщини вуглецевої сталі за 1-й рік, мм (верхня межа)', status: 'verify' };
+
+  // ---------------- ПЕРЕВІРКА ВИХІДНИХ ДАНИХ РЕГІОНУ ----------------
+  /**
+   * Звіряє введені кліматичні й сейсмічні параметри з табличними значеннями норм.
+   *  Пріоритет: рядок міста з Додатка Е ДБН В.1.2-2 → значення району з карти → допустимий діапазон для України.
+   *  status: ok — збігається з таблицею (±1 %); diff — відрізняється від таблиці; range — поза діапазоном норм;
+   *          nodata — табличного значення в застосунку немає (звірити вручну); info — довідково.
+   */
+  N.checkRegion = function (pr) {
+    const s = pr.site, rows = [];
+    const city = N.cities.find(c => c.name === s.city);
+    const add = (param, entered, unit, ref, src, status, note) => rows.push({ param, entered, unit, ref, src, status, note });
+    const cmp = (v, t) => Math.abs(v - t) <= 0.01 * Math.abs(t);
+    // вітер
+    const wD = N.windDistricts.find(d => d.id === s.windDistrict);
+    const W0 = s.windMode === 'district' && wD ? wD.W0 : s.W0;
+    if (s.windMode === 'district') add('Вітер W₀', W0, 'Па', wD ? wD.W0 : null, `${N.windDistrictsMeta.src}, район ${s.windDistrict}`, wD ? 'ok' : 'nodata', 'значення району підставлено з таблиці');
+    else if (city && city.W0) add('Вітер W₀', W0, 'Па', city.W0, `${N.citiesMeta.src}, ${city.name}`, cmp(W0, city.W0) ? 'ok' : 'diff', cmp(W0, city.W0) ? '' : `відрізняється від Додатка Е на ${Math.round((W0 / city.W0 - 1) * 100)} % — обґрунтуйте (дані метеостанції) або виправте`);
+    else add('Вітер W₀', W0, 'Па', null, N.citiesMeta.src, 'nodata', `для «${s.city || '—'}» значення Додатка Е в застосунок не внесено — звірте з таблицею норми`);
+    if (W0 < 300 || W0 > 700) add('Вітер W₀ — діапазон', W0, 'Па', '300…700', 'ДБН В.1.2-2, рис. 9.1 і Додаток Е', 'range', 'значення нетипове для території України');
+    if (wD && s.windMode !== 'district') add('Вітер W₀ — карта районів', W0, 'Па', wD.W0, `${N.windDistrictsMeta.src}, район ${s.windDistrict}`, 'info', 'довідково: для міста пріоритет має Додаток Е');
+    // сніг
+    const sD = N.snowDistricts.find(d => d.id === s.snowDistrict);
+    const S0 = s.snowMode === 'district' && sD ? sD.S0 : s.S0;
+    if (s.snowMode === 'district') add('Сніг S₀', S0, 'Па', sD ? sD.S0 : null, `${N.snowDistrictsMeta.src}, район ${s.snowDistrict}`, sD ? 'ok' : 'nodata', '');
+    else if (city && city.S0) add('Сніг S₀', S0, 'Па', city.S0, `${N.citiesMeta.src}, ${city.name}`, cmp(S0, city.S0) ? 'ok' : 'diff', cmp(S0, city.S0) ? '' : `відрізняється від Додатка Е на ${Math.round((S0 / city.S0 - 1) * 100)} %`);
+    else add('Сніг S₀', S0, 'Па', null, N.citiesMeta.src, 'nodata', 'звірте з Додатком Е');
+    if (s.snowRegion === 'plain' && (S0 < 500 || S0 > 2000)) add('Сніг S₀ — діапазон', S0, 'Па', '500…2000', 'ДБН В.1.2-2, рис. 8.1 і Додаток Е', 'range', 'значення нетипове для рівнинної території');
+    // ожеледь
+    const ice = s.ice || {};
+    if (ice.on) {
+      if (city && city.b != null) {
+        add('Ожеледь b', ice.b, 'мм', city.b, `${N.citiesMeta.src}, ${city.name}`, cmp(ice.b, city.b) ? 'ok' : 'diff', '');
+        add('Вітер при ожеледі W_B', ice.WB, 'Па', city.WB, `${N.citiesMeta.src}, ${city.name}`, cmp(ice.WB, city.WB) ? 'ok' : 'diff', '');
+      } else add('Ожеледь b / W_B', `${ice.b} / ${ice.WB}`, 'мм / Па', null, 'ДБН В.1.2-2, р. 10, Додаток Е', 'nodata', 'звірте з картою ожеледних районів');
+      if (ice.b < 3 || ice.b > 40) add('Ожеледь b — діапазон', ice.b, 'мм', '3…40', 'ДБН В.1.2-2, р. 10', 'range', '');
+    } else add('Ожеледь', 'не враховано', '', 'обов\'язкова для відкритих конструкцій', 'ДБН В.1.2-2, р. 10', 'diff', 'увімкніть, якщо немає обґрунтування');
+    // висота над рівнем моря
+    if (s.Hsea < 0 || s.Hsea > 2.1) add('Висота над рівнем моря H', s.Hsea, 'км', '0…2,1', 'топографія України', 'range', '');
+    else add('Висота над рівнем моря H', s.Hsea, 'км', s.Hsea > 0.5 ? '> 0,5 → C_alt = 2H' : '≤ 0,5 → C_alt = 1', 'ДБН В.1.2-2, п. 9.13 (Зміна № 1)', 'ok', '');
+    // строк служби і клас наслідків
+    add('Строк експлуатації T', s.Tlife, 'р.', '≥ 100 для монументальних споруд', 'ДБН В.1.2-14 (установлений строк експлуатації)', s.Tlife >= 100 ? 'ok' : 'diff', s.Tlife >= 100 ? '' : 'для пам\'ятників і монументальної скульптури зазвичай приймають 100 р.');
+    // сейсміка
+    const sz = s.seismic || {};
+    add('Сейсмічність', sz.on ? sz.intensity : 'не враховано', 'бал', '6…9 (карта ЗСР-2004, ДБН В.1.1-12, дод. А)', N.docs.seismic, sz.on ? (sz.intensity >= 5 && sz.intensity <= 9 ? 'nodata' : 'range') : 'diff', sz.on ? `перелік населених пунктів у застосунок не внесено — звірте бальність для «${s.city || pr.meta.location}» з додатком А (з 01.07.2026 — нова редакція)` : 'для районів ≥ 6 балів сейсміку враховувати обов\'язково');
+    if (sz.on && !['I', 'II', 'III'].includes(sz.soil)) add('Категорія ґрунту за сейсмічними властивостями', sz.soil, '', 'I, II, III', N.docs.seismic, 'range', '');
+    // температура
+    const t = s.temp || {};
+    if (t.on) add('Перепад температур ΔT+ / ΔT−', `${t.dTplus} / ${t.dTminus}`, '°C', '+20…+50 / −30…−55', 'ДБН В.1.2-2, р. 11 (карти t_e, Δ)', (t.dTplus >= 20 && t.dTplus <= 50 && t.dTminus <= -30 && t.dTminus >= -55) ? 'nodata' : 'range', 'звірте з кліматичними картами для міста');
+    // відповідність міста адресі
+    if (s.city && pr.meta.location && !pr.meta.location.includes(s.city)) add('Місто кліматичних даних', s.city, '', pr.meta.location, 'загальні дані проєкту', 'diff', 'місто кліматичних даних не збігається з місцем встановлення');
+    const worst = rows.some(r => r.status === 'range') ? 'range' : rows.some(r => r.status === 'diff') ? 'diff' : rows.some(r => r.status === 'nodata') ? 'nodata' : 'ok';
+    return { rows, worst };
+  };
+  N.regionStatusText = { ok: 'відповідає таблиці норм', diff: 'відрізняється від таблиці', range: 'поза діапазоном норм', nodata: 'немає табличного значення — звірити', info: 'довідково' };
 
   // ---------------- утиліти ----------------
   N.interp = function (xs, ys, x) {

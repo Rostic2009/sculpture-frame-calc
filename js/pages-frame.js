@@ -60,13 +60,13 @@
       ${card('Додаткові стрижні', `<div class="tw"><table class="edit"><thead><tr><th>Початок</th><th>Кінець</th><th>Переріз</th><th>Робота</th><th>Група</th><th></th></tr></thead><tbody>
         ${(fr.extraElems || []).map((e, i) => `<tr><td><select data-xe="${i}.i">${nodeOpts(e.i)}</select></td><td><select data-xe="${i}.j">${nodeOpts(e.j)}</select></td><td><select data-xe="${i}.sec">${secOptions().map(([v]) => `<option ${v === e.sec ? 'selected' : ''}>${v}</option>`).join('')}</select></td><td><select data-xe="${i}.type"><option value="beam" ${e.type !== 'truss' ? 'selected' : ''}>балка (згин)</option><option value="truss" ${e.type === 'truss' ? 'selected' : ''}>ферма (осьова)</option></select></td><td><input data-xe="${i}.group" value="${esc(e.group || 'Додаткові елементи')}"></td><td><button class="btn small" data-act="delXE" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="6">Немає.</td></tr>'}
       </tbody></table></div><div class="row"><button class="btn" data-act="addXE">Додати стрижень</button></div>`)}
-      ${card('Згенеровані вузли', fmt.tbl(['Вузол', 'x, м', 'y, м', 'z, м', 'Закріплення'], mdl.nodes.map(n => [n.id, f(n.x, 3), f(n.y, 3), f(n.z, 3), n.sup ? (n.sup[3] ? 'защемлення' : 'шарнір') : '—'])), `${mdl.nodes.length}`)}
-      ${card('Згенеровані стрижні', fmt.tbl(['Елемент', 'Вузли', 'Група', 'Переріз', 'Робота', 'Довжина, м'], mdl.elems.map(e => { const a = mdl.nodes.find(n => n.id === e.i), b = mdl.nodes.find(n => n.id === e.j); return [e.id, `${e.i} → ${e.j}`, esc(e.group), e.sec.name, e.type === 'truss' ? 'ферма' : 'балка', f(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z), 3)]; })), `${mdl.elems.length}`)}`;
+      ${card('Згенеровані вузли', fmt.tbl(['№', 'Вузол', 'x, м', 'y, м', 'z, м', 'Закріплення'], mdl.nodes.map(n => [n.num, n.id, f(n.x, 3), f(n.y, 3), f(n.z, 3), n.sup ? (n.sup[3] ? 'защемлення' : 'шарнір') : '—'])), `${mdl.nodes.length}`)}
+      ${card('Згенеровані стрижні', fmt.tbl(['Марка', 'Секція', 'Елемент', 'Вузли (№)', 'Група', 'Переріз', 'Робота', 'Довжина, м'], mdl.elems.map(e => { const a = mdl.nodes.find(n => n.id === e.i), b = mdl.nodes.find(n => n.id === e.j); return [`<b>${e.mark || ''}</b>`, e.sect ? `<span class="sect-chip" style="background:${e.color}">${e.sect}</span>` : '', e.id, `${e.i} (${a.num}) → ${e.j} (${b.num})`, esc(e.group), e.sec.name, e.type === 'truss' ? 'ферма' : 'балка', f(Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z), 3)]; })), `${mdl.elems.length}`)}`;
     },
     after(c) {
       const cv = document.getElementById('cvNodes'); if (!cv) return;
       const mdl = SC.model.build(c.state.pr);
-      const v = SC.view3d.create(cv, () => ({ nodes: mdl.nodes, elems: mdl.elems, parts: c.state.pr.parts, labels: true }));
+      const v = SC.view3d.create(cv, () => ({ nodes: mdl.nodes, elems: mdl.elems, parts: c.state.pr.parts, labels: true, colorBy: 'sect', sections: mdl.sections, sectLabels: true }));
       v.draw(); P.nodes.view = v;
     },
     resize() { if (P.nodes.view) P.nodes.view.draw(); },

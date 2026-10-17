@@ -181,6 +181,14 @@
       return { e, k, L: el.L, Lsys, lam, lamLim: SC.checks.lambdaLimit(kind, best.u), best, mass: e.sec.mass * el.L, byCombo: all };
     });
     memberRes.forEach(m => { if (m.lam > m.lamLim) W('warn', `${m.e.id} (${m.e.group}): гнучкість λ = ${m.lam.toFixed(0)} > ${m.lamLim.toFixed(0)}.`, 'members'); });
+    // результати по секціях (ярус ядра, консоль): довжина, маса, визначальний стрижень
+    const sectionRes = (mdl.sections || []).map(sc => {
+      const ms = memberRes.filter(m => m.e.sect === sc.code);
+      const gov = ms.reduce((a, m) => (!a || m.best.u > a.best.u ? m : a), null);
+      const prof = new Map();
+      ms.forEach(m => { const q = prof.get(m.e.sec.name) || { sec: m.e.sec.name, n: 0, L: 0, mass: 0, mpm: m.e.sec.mass }; q.n++; q.L += m.L; q.mass += m.mass; prof.set(m.e.sec.name, q); });
+      return Object.assign({}, sc, { members: ms, gov, uMax: gov ? gov.best.u : 0, L: ms.reduce((a, m) => a + m.L, 0), mass: ms.reduce((a, m) => a + m.mass, 0), profiles: [...prof.values()] });
+    });
     const failing = memberRes.filter(m => m.best.u > 1);
     if (failing.length) W('error', `${failing.length} елементів не проходять перевірку (U > 1). Збільшіть переріз або змініть схему.`, 'members');
     memberRes.forEach(m => { if (m.best.chk && m.best.chk.en.cls === 4) W('warn', `${m.e.id}: переріз ${m.e.sec.name} класу 4 (c/t = ${m.best.chk.en.ct.toFixed(1)}) — враховано ефективну площу.`, 'members'); });
@@ -299,6 +307,8 @@
       vortex = { b, vcrit, vm, need: vcrit < 1.25 * vm };
       if (vortex.need) W('warn', `Вихрове збудження: v_crit = ${vcrit.toFixed(1)} м/с < 1,25·v_m = ${(1.25 * vm).toFixed(1)} м/с — потрібна перевірка поперечних коливань і втоми швів/анкерів (EN 1991-1-4, дод. E; ТЗ WLD-070).`, 'dyn');
     }
+    const region = N.checkRegion(pr);
+    region.rows.filter(r => r.status === 'range' || r.status === 'diff').forEach(r => W(r.status === 'range' ? 'error' : 'warn', `Дані регіону: ${r.param} = ${r.entered} ${r.unit} — ${N.regionStatusText[r.status]} (${r.ref == null ? '—' : r.ref}; ${r.src})${r.note ? '. ' + r.note : ''}.`, 'site'));
     if (!(pr.supports && pr.supports.confirmed)) W('warn', 'Опори не підтверджені користувачем (ТЗ UI-5.4): розрахункову схему закріплення потрібно підтвердити в розділі «Опори».', 'geom');
     if ((pr.parts || []).length === 0) W('error', 'Не задано жодної частини скульптури.', 'geom');
     (pr.parts || []).forEach(p => { if (p.status === 'assumed') W('warn', `Частина «${p.name}»: геометрія припущена (не підтверджена розмірами).`, 'geom'); });
@@ -307,9 +317,9 @@
     const status = warn.some(w => w.level === 'error') ? 'not-ok' : anyCfDefault ? 'preliminary' : 'ok';
     return {
       ok: true, time: Date.now() - t0, pr, mdl, P, clim, cases, combos, sls, solved, stations, seis, modalG, T1,
-      memberRes, govMember, alphaCr, alphaCombo, uMax, uNode, uCombo, uLim, Htot, supportRes, welds, flexLog, shellRes, vortex,
+      memberRes, sectionRes, govMember, alphaCr, alphaCombo, uMax, uNode, uCombo, uLim, Htot, supportRes, welds, flexLog, shellRes, vortex,
       found: { fd, Rsoil, fSls, fUls, govSls, govUls, slab, reinf: slab, settle, ped, rebar, soil },
-      spec, warn, status, eqMax,
+      spec, warn, status, eqMax, region,
     };
   };
 

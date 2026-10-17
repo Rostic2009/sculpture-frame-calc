@@ -182,7 +182,57 @@
         partAttach.push({ part: pi, mass, targets });
       }
     });
-    return { nodes, elems, groups, levels, levelNodes, H, posts, partAttach, steel };
+    const sections = M.markSections({ nodes, elems, levels, levelNodes, posts, pr });
+    return { nodes, elems, groups, levels, levelNodes, H, posts, partAttach, steel, sections };
+  };
+
+  /** Палітра секцій: розрізнювані кольори, читаються на світлому й темному фоні. */
+  M.sectColors = ['#2b6cb0', '#c05621', '#2f855a', '#9b2c9b', '#b7791f', '#0f8a8a', '#c53030', '#5a67d8', '#718096', '#d53f8c', '#38a169', '#805ad5'];
+  const ROLE = { post: ['С', 'стійка'], brace: ['Р', 'розкіс / зв\'язок'], ring: ['П', 'пояс'], cant: ['К', 'консоль'], extra: ['Д', 'додатковий'] };
+  M.roleName = r => (ROLE[r] || ['?', r])[1];
+
+  /**
+   * Ділить каркас на розрахункові секції й маркує вузли та стрижні.
+   *  Я1, Я2… — яруси ядра між сусідніми рівнями (стійки, зв'язки ярусу й верхній пояс);
+   *  К1, К2… — консолі частин скульптури; Д — додаткові елементи редактора.
+   *  Марка стрижня: <секція>-<роль><№>, напр. Я2-Р3 (третій розкіс другого ярусу).
+   *  Кожен ярус ядра має грані (розгортки) між сусідніми стійками — для 2D-креслень.
+   */
+  M.markSections = function ({ nodes, elems, levels, levelNodes, posts, pr }) {
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    nodes.forEach((n, i) => { n.num = i + 1; });
+    const sections = [];
+    const sect = (code, kind, name, extra) => { const s = Object.assign({ code, kind, name, elems: [], color: M.sectColors[sections.length % M.sectColors.length] }, extra || {}); sections.push(s); return s; };
+    for (let li = 0; li < levels.length - 1; li++) {
+      const A = levelNodes[li].ids, B = levelNodes[li + 1].ids;
+      const faces = [];
+      if (posts > 1) for (let k = 0; k < posts; k++) { const k2 = (k + 1) % posts; faces.push({ name: `грань ${k + 1}–${k2 + 1}`, nodes: [A[k], A[k2], B[k2], B[k]] }); }
+      const s = sect(`Я${li + 1}`, 'tier', `Ядро, ярус ${li + 1} (z = ${levels[li].toFixed(2)}…${levels[li + 1].toFixed(2)} м)`, { li, z0: levels[li], z1: levels[li + 1], faces, nodeIds: A.concat(B) });
+    }
+    const tiers = sections.slice();
+    const tierFor = e => {
+      const a = byId.get(e.i), b = byId.get(e.j);
+      if (a.level == null || b.level == null) return null;
+      const lo = Math.min(a.level, b.level), hi = Math.max(a.level, b.level);
+      if (hi === lo) return tiers[Math.max(0, hi - 1)] || null; // пояс належить ярусу під ним
+      return tiers[lo] || null;
+    };
+    let nCant = 0, extraS = null;
+    const cantS = new Map();
+    elems.forEach(e => {
+      let s, role;
+      if (e.cantilever) {
+        if (!cantS.has(e.part)) { nCant++; const p = (pr.parts || [])[e.part] || {}; cantS.set(e.part, sect(`К${nCant}`, 'cant', `Консоль «${p.name || 'частина ' + (e.part + 1)}»`, { part: e.part })); }
+        s = cantS.get(e.part); role = 'cant';
+      } else if (e.group === 'Стійки ядра' || e.group === "Зв'язки" || e.group === 'Пояси (кільця)') {
+        s = tierFor(e); role = e.group === 'Стійки ядра' ? 'post' : e.group === 'Пояси (кільця)' ? 'ring' : 'brace';
+      }
+      if (!s) { if (!extraS) extraS = sect('Д', 'extra', 'Додаткові елементи'); s = extraS; role = role || 'extra'; }
+      const cnt = (s.cnt = s.cnt || {}); cnt[role] = (cnt[role] || 0) + 1;
+      e.sect = s.code; e.role = role; e.color = s.color; e.mark = `${s.code}-${ROLE[role][0]}${cnt[role]}`;
+      s.elems.push(e.id);
+    });
+    return sections.filter(s => s.elems.length);
   };
 
   /**

@@ -52,24 +52,43 @@
     render(c) {
       const { state, esc } = c;
       if (!state.R || !state.R.ok) return '<h2>Звіт</h2>' + c.needCalc();
-      const R = state.R, type = state.ui.repType || 'calc';
+      const R = state.R, type = state.ui.repType || 'full';
       const st = state.pr.status.value;
       const blockedApproval = ['Чернетка', 'Потребує уточнення', 'Попередній розрахунок', 'Застарілий'].includes(st) || state.stale || R.status !== 'ok';
       const failed = R.warn.filter(w => w.level === 'error');
-      const types = [['eval', 'Оцінковий звіт'], ['calc', 'Розрахунковий звіт'], ['approval', 'Комплект для погодження'], ['spec', 'Специфікація'], ['estimate', 'Кошторис']];
+      const types = [['full', 'Комплект: звіти 1–4'], ['r1', '1 · Каркас'], ['r2', '2 · Анкерні болти'], ['r3', '3 · Бетонна основа'], ['r4', '4 · Навантаження'], ['calc', 'Розрахункова записка'], ['eval', 'Оцінковий звіт'], ['approval', 'Комплект для погодження'], ['spec', 'Специфікація'], ['estimate', 'Кошторис']];
       const pre = `<section class="card noprint"><h3>Перед експортом (UI-10.2)</h3><ul class="kv">
         <li><span>Статус результату</span><b>${esc(st)}</b></li><li><span>Версія даних</span><b>${(state.pr.journal || []).length} змін, ${esc(state.pr.meta.date)}</b></li>
         <li><span>Невиконані перевірки</span><b>${failed.length ? failed.length + ' критичних' : 'немає'}</b></li><li><span>Застарілі дані</span><b>${state.stale ? 'так — перерахуйте' : 'ні'}</b></li>
         <li><span>Обмеження</span><b>${R.status === 'preliminary' ? 'попередній результат' : R.status === 'ok' ? 'немає' : 'не всі перевірки виконані'}</b></li></ul>
         <div class="row">${types.map(([k, l]) => `<button class="chip ${type === k ? 'on' : ''}" data-act="repType" data-t="${k}" ${k === 'approval' && blockedApproval ? 'disabled title="Заблоковано: статус ' + esc(st) + '"' : ''}>${l}</button>`).join('')}</div>
         ${type === 'approval' && blockedApproval ? '<ul class="warns"><li class="error">Комплект для погодження заблоковано (UI-10.3): статус «Чернетка», «Потребує уточнення», «Попередній» або «Застарілий».</li></ul>' : ''}
-        <div class="row">${c.inFrame ? '<span class="note">Друк і PDF доступні у версії на GitHub Pages.</span>' : '<button class="btn primary" data-act="print">Друк / PDF</button><button class="btn" data-act="savehtml">Зберегти HTML</button>'}<button class="btn" data-act="copyreport">Скопіювати текст</button></div></section>`;
-      const body = type === 'spec' ? SC.report.specTable(R.spec) : type === 'estimate' ? SC.report.estimate(R) : SC.report.build(R, { type: type === 'approval' && blockedApproval ? 'calc' : type });
+        <div class="row"><button class="btn primary" data-act="pdf" id="pdfBtn">Завантажити PDF</button>${c.inFrame ? '' : '<button class="btn" data-act="print">Друк</button><button class="btn" data-act="savehtml">Зберегти HTML</button>'}<button class="btn" data-act="copyreport">Скопіювати текст</button></div>
+        ${state.ui.pdfMsg ? `<p class="note">${esc(state.ui.pdfMsg)}</p>` : ''}</section>`;
+      const RS = SC.reports;
+      const body = type === 'full' ? RS.full(R) : type === 'r1' ? RS.frame(R) : type === 'r2' ? RS.anchors(R) : type === 'r3' ? RS.base(R) : type === 'r4' ? RS.loads(R)
+        : type === 'spec' ? SC.report.specTable(R.spec) : type === 'estimate' ? SC.report.estimate(R) : SC.report.build(R, { type: type === 'approval' && blockedApproval ? 'calc' : type });
       return `<h2 class="noprint">Звіт</h2>${c.staleBanner()}${pre}<article class="report" id="report">${body}</article>`;
     },
     onAct(a, b, c) {
       if (a === 'repType') { c.state.ui.repType = b.dataset.t; c.render(); return true; }
       if (a === 'print') { window.print(); return true; }
+      if (a === 'pdf') {
+        const el = document.getElementById('report'), btn = document.getElementById('pdfBtn');
+        const names = { full: 'komplekt-zvitiv', r1: 'zvit-1-karkas', r2: 'zvit-2-ankery', r3: 'zvit-3-fundament', r4: 'zvit-4-navantazhennia', calc: 'rozrakhunkova-zapyska', eval: 'otsinkovyi-zvit', approval: 'komplekt-pohodzhennia', spec: 'spetsyfikatsiia', estimate: 'koshtorys' };
+        const t = c.state.ui.repType || 'full', pr = c.state.pr;
+        if (btn) { btn.disabled = true; btn.textContent = 'Формую PDF…'; }
+        setTimeout(async () => {
+          try {
+            const h1 = el.querySelector('h1');
+            const blob = await SC.pdf.fromElement(el, { title: h1 ? h1.textContent : 'Звіт', project: pr.meta.name + ' · ' + pr.meta.location, author: pr.meta.author });
+            const res = await SC.pdf.save(blob, `${names[t] || 'zvit'}-${pr.meta.date}.pdf`);
+            c.state.ui.pdfMsg = res === 'declined' ? 'Збереження PDF скасовано.' : `PDF сформовано (${(blob.size / 1024).toFixed(0)} КБ).`;
+          } catch (e) { c.state.ui.pdfMsg = 'Не вдалося сформувати PDF: ' + (e.message || e.code || e); }
+          c.render();
+        }, 30);
+        return true;
+      }
       if (a === 'copyreport') { c.copy(document.getElementById('report').innerText, 'Текст звіту скопійовано.'); return true; }
       if (a === 'savehtml') {
         const css = [...document.styleSheets].map(s => { try { return [...s.cssRules].map(r => r.cssText).join('\n'); } catch (e) { return ''; } }).join('\n');

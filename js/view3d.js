@@ -8,7 +8,8 @@
   V.create = function (canvas, getData) {
     const st = { yaw: -0.7, pitch: 0.35, zoom: 1, panX: 0, panY: 0, defScale: 0, showParts: true, mesh: null };
     let drag = null;
-    const css = n => getComputedStyle(canvas).getPropertyValue(n).trim();
+    let cur = null; // дані поточного кадру: d.colors задає кольори явно (рендер для звіту/PDF поза темою сторінки)
+    const css = n => (cur && cur.colors && cur.colors[n]) || getComputedStyle(canvas).getPropertyValue(n).trim();
     function proj(p, W, H, s, c) {
       const x = p[0] - c[0], y = p[1] - c[1], z = p[2] - c[2];
       const cy = Math.cos(st.yaw), sy = Math.sin(st.yaw), cp = Math.cos(st.pitch), sp = Math.sin(st.pitch);
@@ -25,11 +26,13 @@
     }
     function draw() {
       const d = getData(); if (!d) return;
-      const dpr = window.devicePixelRatio || 1;
-      const W = canvas.clientWidth, H = canvas.clientHeight;
+      cur = d;
+      const dpr = d.dpr || window.devicePixelRatio || 1;
+      const W = d.W || canvas.clientWidth, H = d.H || canvas.clientHeight;
       canvas.width = W * dpr; canvas.height = H * dpr;
       const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
       g.clearRect(0, 0, W, H);
+      if (d.colors && d.colors['--bg']) { g.fillStyle = d.colors['--bg']; g.fillRect(0, 0, W, H); }
       const nodes = d.nodes;
       let mn = [Infinity, Infinity, Infinity], mx = [-Infinity, -Infinity, -Infinity];
       const pts = nodes.map(n => [n.x, n.y, n.z]).concat((d.parts || []).map(p => [p.x, p.y, p.z]));
@@ -68,12 +71,35 @@
       const segs = d.elems.map((e, i) => { const a = P(disp(pos.get(e.i))), b = P(disp(pos.get(e.j))); return { e, i, a, b, z: (a[2] + b[2]) / 2 }; }).sort((p, q) => p.z - q.z);
       for (const sg of segs) {
         const u = d.U ? d.U[sg.i] : null;
-        g.strokeStyle = uColor(u);
+        g.globalAlpha = d.highlight && sg.e.sect !== d.highlight ? 0.18 : 1;
+        g.strokeStyle = d.colorBy === 'sect' && sg.e.color ? sg.e.color : uColor(u);
         g.lineWidth = sg.e.type === 'truss' ? 1.5 : sg.e.cantilever ? 3 : 3.5;
         if (sg.e.type === 'truss') g.setLineDash([5, 3]); else g.setLineDash([]);
         g.beginPath(); g.moveTo(sg.a[0], sg.a[1]); g.lineTo(sg.b[0], sg.b[1]); g.stroke();
       }
-      g.setLineDash([]);
+      g.setLineDash([]); g.globalAlpha = 1;
+      // марки стрижнів і назви секцій
+      if (d.marks) {
+        g.font = '10px ' + css('--font-mono');
+        for (const sg of segs) {
+          if (d.highlight && sg.e.sect !== d.highlight) continue;
+          const mx2 = (sg.a[0] + sg.b[0]) / 2, my2 = (sg.a[1] + sg.b[1]) / 2;
+          g.fillStyle = css('--fg'); g.fillText(sg.e.mark || sg.e.id, mx2 + 3, my2 - 3);
+        }
+      }
+      if (d.sectLabels && d.sections) {
+        g.font = '600 12px ' + css('--font-mono');
+        d.sections.forEach(sc => {
+          const ids = new Set(sc.elems); let sx = 0, sy = 0, sz = 0, n = 0;
+          d.elems.forEach(e => { if (!ids.has(e.id)) return; for (const id of [e.i, e.j]) { const q = disp(pos.get(id)); sx += q[0]; sy += q[1]; sz += q[2]; n++; } });
+          if (!n) return;
+          const q = P([sx / n, sy / n, sz / n]);
+          const x = sc.kind === 'tier' ? P([mx[0], sy / n, sz / n])[0] + 14 : q[0] + 10, y = q[1];
+          const tw = g.measureText(sc.code).width + 10;
+          g.fillStyle = sc.color; g.fillRect(x, y - 10, tw, 16);
+          g.fillStyle = '#fff'; g.fillText(sc.code, x + 5, y + 2);
+        });
+      }
       // підписи вузлів
       if (d.labels) { g.fillStyle = css('--muted'); g.font = '10px ' + css('--font-mono'); nodes.forEach((n, k) => { const q = P(disp(k)); g.fillText(n.id, q[0] + 4, q[1] - 4); }); }
       // опори

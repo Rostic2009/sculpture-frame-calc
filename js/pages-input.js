@@ -3,13 +3,19 @@
   'use strict';
   const P = SC.pages = SC.pages || {};
 
+  P.regionTable = function (c, reg) {
+    const cls = { ok: 'ok', diff: 'warn', range: 'bad', nodata: 'warn', info: '' };
+    return c.fmt.tbl(['Параметр', 'Введено', 'За нормою', 'Джерело', 'Висновок'], reg.rows.map(r => [r.param, `${c.esc(r.entered)} ${r.unit}`, r.ref == null ? '—' : c.esc(r.ref), c.esc(r.src), `<span class="pill ${cls[r.status]}">${SC.norms.regionStatusText[r.status]}</span>${r.note ? '<br><small>' + c.esc(r.note) + '</small>' : ''}`]));
+  };
   P.site = {
     input: true,
     render(c) {
       const { fld, card, N, state } = c;
       const env = state.pr.site.env;
       const cr = N.corrosivity.find(x => x.id === env.corrosivity) || N.corrosivity[1];
-      return `<h2>Майданчик і умови експлуатації</h2>
+      const reg = N.checkRegion(state.pr);
+      const regCard = card('Перевірка даних регіону на відповідність нормам', P.regionTable(c, reg) + `<p class="note">Кожне значення звіряється з рядком міста Додатка Е ДБН В.1.2-2, з картою районів і з діапазоном, допустимим для території України. «Немає табличного значення» означає, що таблицю для цього параметра або міста в застосунок не внесено — звірте вручну й зафіксуйте джерело.</p>`, N.regionStatusText[reg.worst]);
+      return `<h2>Майданчик і умови експлуатації</h2>${regCard}
       <p class="lead">Місце встановлення визначає кліматичні впливи; середовище — захист від корозії та корозійний припуск (ТЗ 2.6).</p>
       <div class="cols">
       ${card('Розташування', `<div class="form">

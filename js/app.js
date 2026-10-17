@@ -50,11 +50,11 @@
     ['1 · Вихідні дані', [['site', 'Майданчик і експлуатація'], ['images', 'Зображення виробу'], ['parts', 'Частини скульптури'], ['model3d', '3D-модель'], ['supports', 'Опори'], ['shellIn', 'Оболонка']]],
     ['2 · Навантаження', [['registry', 'Реєстр впливів'], ['wind', 'Вітер'], ['aero', 'Аеродинаміка'], ['snow', 'Сніг'], ['ice', 'Ожеледь'], ['temp', 'Температура'], ['seismic', 'Сейсміка'], ['userLoads', 'Монтаж і обслуговування'], ['combos', 'Сполучення']]],
     ['3 · Каркас', [['frame', 'Схема і генерація'], ['nodes', 'Вузли та стрижні'], ['sections', 'Перерізи і підбір'], ['variants', 'Порівняння варіантів'], ['catalog', 'Сортамент труб']]],
-    ['4 · Розрахунок', [['fem', 'Рама (МСЕ)'], ['secCheck', 'Перевірка перерізів'], ['stability', 'Стійкість і динаміка'], ['welds', 'Зварні шви'], ['basePlate', 'Опорна плита і ребра'], ['anchors', 'Анкери і закладні деталі'], ['foundation', 'Фундаментна плита'], ['rebar', 'Армування'], ['shell', 'Оболонка (лист)']]],
+    ['4 · Розрахунок', [['fem', 'Рама (МСЕ)'], ['sects', 'Секції каркаса'], ['secCheck', 'Перевірка перерізів'], ['stability', 'Стійкість і динаміка'], ['welds', 'Зварні шви'], ['basePlate', 'Опорна плита і ребра'], ['anchors', 'Анкери і закладні деталі'], ['foundation', 'Фундаментна плита'], ['rebar', 'Армування'], ['shell', 'Оболонка (лист)']]],
     ['5 · Документи', [['spec', 'Специфікація і кошторис'], ['drawings', 'Креслення'], ['report', 'Звіт']]],
     ['Довідка', [['norms', 'Нормативна база'], ['tz', 'Аналіз ТЗ'], ['tests', 'Перевірка ядра'], ['help', 'Методика']]],
   ];
-  const PAGE_REF = { members: 'secCheck', welds: 'welds', base: 'basePlate', found: 'foundation', wind: 'wind', seis: 'seismic', fem: 'fem', sls: 'fem', shell: 'shell', geom: 'supports', dyn: 'stability' };
+  const PAGE_REF = { site: 'site', members: 'secCheck', welds: 'welds', base: 'basePlate', found: 'foundation', wind: 'wind', seis: 'seismic', fem: 'fem', sls: 'fem', shell: 'shell', geom: 'supports', dyn: 'stability' };
 
   function readiness() {
     const pr = state.pr, R = state.R;
@@ -78,6 +78,7 @@
     try {
       u = {
         secCheck: Math.max(...R.memberRes.map(m => m.best.u)),
+        sects: Math.max(...R.memberRes.map(m => m.best.u)),
         welds: Math.max(0, ...R.welds.map(w => w.u)),
         basePlate: Math.max(...R.supportRes.map(s => s.best.u)),
         anchors: Math.max(...R.supportRes.map(s => s.best.b ? Math.max(s.best.b.anchorSteel, s.best.b.concrete.max, s.best.b.washer.max) : 0)),

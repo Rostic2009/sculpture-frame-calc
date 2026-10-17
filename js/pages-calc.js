@@ -30,7 +30,7 @@
       });
       if (ui.group) rows = rows.filter(r => r.m.e.group === ui.group);
       if (ui.umin) rows = rows.filter(r => r.u >= ui.umin);
-      if (ui.q) rows = rows.filter(r => (r.m.e.id + ' ' + r.m.e.group + ' ' + r.m.e.sec.name).toLowerCase().includes(ui.q.toLowerCase()));
+      if (ui.q) rows = rows.filter(r => (r.m.e.id + ' ' + (r.m.e.mark || '') + ' ' + r.m.e.group + ' ' + r.m.e.sec.name).toLowerCase().includes(ui.q.toLowerCase()));
       rows.sort((a, b) => ui.sort === 'id' ? a.m.k - b.m.k : b.u - a.u);
       const groups = [...new Set(R.memberRes.map(m => m.e.group))];
       const det = ui.sel != null ? R.memberRes[ui.sel] : null;
@@ -38,7 +38,7 @@
       if (det) {
         const s = sel || R.solved.find(x => x.cb.id === det.best.cbId) || R.solved[0];
         const fr = s.forces[det.k];
-        detail = card(`Елемент ${det.e.id} · ${esc(det.e.group)} · ${det.e.sec.name}`, `<p class="note">Вузли ${det.e.i} → ${det.e.j}; L = ${f(det.L, 3)} м; сполучення ${esc(s.cb.id)}: ${esc(s.cb.name)}. Зусилля в 5 перерізах (0; ¼; ½; ¾; 1)·L, локальні осі елемента.</p>
+        detail = card(`Елемент ${det.e.mark || ''} (${det.e.id}) · ${esc(det.e.group)} · ${det.e.sec.name}`, `<p class="note">Вузли ${det.e.i} → ${det.e.j}; L = ${f(det.L, 3)} м; сполучення ${esc(s.cb.id)}: ${esc(s.cb.name)}. Зусилля в 5 перерізах (0; ¼; ½; ¾; 1)·L, локальні осі елемента.</p>
           <div class="diags">${diagram(fr.map(x => x.N), 'N', 'кН')}${diagram(fr.map(x => x.My), 'M_y', 'кН·м')}${diagram(fr.map(x => x.Mz), 'M_z', 'кН·м')}${diagram(fr.map(x => Math.hypot(x.Vy, x.Vz)), 'V', 'кН')}${diagram(fr.map(x => x.T), 'T', 'кН·м')}</div>
           ${fmt.tbl(['x/L', 'N, кН', 'V_y, кН', 'V_z, кН', 'T, кН·м', 'M_y, кН·м', 'M_z, кН·м'], fr.map((x, i) => [R.stations[i], kN(x.N), kN(x.Vy), kN(x.Vz), kNm(x.T), kNm(x.My), kNm(x.Mz)]))}
           <div class="row"><button class="btn small" data-tab="secCheck">Перевірка перерізу →</button><button class="btn small" data-act="femSel" data-k="">Закрити</button></div>`);
@@ -60,7 +60,7 @@
         <div class="fld"><label for="femSort">Сортування</label><select id="femSort"><option value="u" ${ui.sort === 'u' ? 'selected' : ''}>за U</option><option value="id" ${ui.sort === 'id' ? 'selected' : ''}>за номером</option></select></div>
       </div>`)}
       ${detail}
-      ${card('Елементи', fmt.tbl(['Елемент', 'Група', 'Переріз', 'L, м', 'N, кН', 'M_y, кН·м', 'M_z, кН·м', 'U', 'Визначальне', ''], rows.map(r => [r.m.e.id, esc(r.m.e.group), r.m.e.sec.name, f(r.m.L, 2), kN(r.fm.N), kNm(r.fm.My), kNm(r.fm.Mz), fmt.U(r.u), esc(ui.combo || r.m.best.combo.split(':')[0]), `<button class="btn small" data-act="femSel" data-k="${r.m.k}">Епюри</button>`])) + `<div class="row"><button class="btn" data-act="femCsv">Скопіювати таблицю (CSV)</button></div>`, `${rows.length} з ${R.memberRes.length}`)}
+      ${card('Елементи', fmt.tbl(['Елемент', 'Група', 'Переріз', 'L, м', 'N, кН', 'M_y, кН·м', 'M_z, кН·м', 'U', 'Визначальне', ''], rows.map(r => [`<b>${r.m.e.mark || ''}</b> ${r.m.e.id}`, esc(r.m.e.group), r.m.e.sec.name, f(r.m.L, 2), kN(r.fm.N), kNm(r.fm.My), kNm(r.fm.Mz), fmt.U(r.u), esc(ui.combo || r.m.best.combo.split(':')[0]), `<button class="btn small" data-act="femSel" data-k="${r.m.k}">Епюри</button>`])) + `<div class="row"><button class="btn" data-act="femCsv">Скопіювати таблицю (CSV)</button></div>`, `${rows.length} з ${R.memberRes.length}`)}
       ${card('Реакції опор', fmt.tbl(['Вузол', 'R_x, кН', 'R_y, кН', 'R_z, кН', 'M_x, кН·м', 'M_y, кН·м', 'M_z, кН·м'], reac.map(r => [r.node, ...r.r.slice(0, 3).map(kN), ...r.r.slice(3).map(kNm)])), sel ? sel.cb.id : R.solved[0].cb.id)}
       ${card('Переміщення (II група)', `<p>Найбільше горизонтальне: <b>${f(R.uMax * 1000, 1)} мм</b> (вузол ${R.uNode ? R.uNode.id : '—'}, ${esc(R.uCombo || '')}); граничне H/${R.pr.design.defLimit} = ${f(R.uLim * 1000, 1)} мм → ${R.uMax <= R.uLim ? c.pill('виконується', 'ok') : c.pill('не виконується', 'bad')}.</p>`)}`;
     },
@@ -91,6 +91,55 @@
       if (a === 'femCsv') { const R = c.state.R; c.copy(['Елемент;Група;Переріз;L;N кН;My кНм;Mz кНм;U;Сполучення'].concat(R.memberRes.map(m => [m.e.id, m.e.group, m.e.sec.name, m.L.toFixed(3), (m.best.f.N / 1000).toFixed(2), (m.best.f.My / 1000).toFixed(2), (m.best.f.Mz / 1000).toFixed(2), m.best.u.toFixed(3), m.best.combo].join(';'))).join('\n'), 'Таблицю скопійовано.'); return true; }
       return false;
     },
+  };
+
+  // ---------- секції каркаса: розбиття на яруси й консолі, марки, 2D-креслення, результати по секціях ----------
+  const reserve = u => u > 0 ? (u > 1 ? `<b class="bad-t">−${SC.report.fmt.f((u - 1) * 100, 0)} %</b>` : SC.report.fmt.f((1 - u) * 100, 0) + ' %') : '—';
+  P.sectionMemberTable = function (c, sr) {
+    const { fmt, f } = c;
+    return fmt.tbl(['Марка', 'Роль', 'Переріз', 'Вузли', 'L, мм', 'Маса, кг', 'N, кН', 'M<sub>y</sub>; M<sub>z</sub>, кН·м', 'U', 'Запас', 'Визначальне'], sr.members.map(m => {
+      const nd = id => (c.state.R.P.model.nodes[c.state.R.P.idx.get(id)] || {}).num;
+      return [`<b>${m.e.mark}</b>`, SC.model.roleName(m.e.role), m.e.sec.name, `${nd(m.e.i)}–${nd(m.e.j)}`, f(m.L * 1000, 0), f(m.mass, 1), kN(m.best.f.N), `${kNm(m.best.f.My)}; ${kNm(m.best.f.Mz)}`, fmt.U(m.best.u), reserve(m.best.u), c.esc(m.best.combo.split(':')[0])];
+    }));
+  };
+  P.sects = {
+    render(c) {
+      const { state, card, fmt, f, esc } = c;
+      const R = state.R && state.R.ok ? state.R : null;
+      const mdl = R ? R.mdl : SC.model.build(state.pr);
+      const ui = state.ui.sects = state.ui.sects || { hl: '', marks: true };
+      const list = R ? R.sectionRes : mdl.sections;
+      const chip = sc => `<span class="sect-chip" style="background:${sc.color}">${sc.code}</span>`;
+      const summary = R ? fmt.tbl(['Секція', 'Склад', 'Стрижнів', 'Профілі', 'L, м', 'Маса, кг', 'max U', 'Запас', 'Визначальний стрижень'], list.map(sr => [
+        `<button class="link" data-act="sectHl" data-c="${sr.code}">${chip(sr)}</button>`, esc(sr.name), sr.members.length, sr.profiles.map(p => `${p.sec} × ${p.n}`).join('<br>'), f(sr.L, 2), f(sr.mass, 1), fmt.U(sr.uMax), reserve(sr.uMax), sr.gov ? `${sr.gov.e.mark} · ${esc(sr.gov.best.combo.split(':')[0])}` : '—'])) : `<p class="note">Креслення побудовано за поточною схемою. Зусилля й коефіцієнти використання з'являться після розрахунку.</p>`;
+      const sheets = list.filter(sc => !ui.hl || sc.code === ui.hl).map(sc => `<section class="card sect-card" style="border-top:4px solid ${sc.color}"><h3>${chip(sc)} ${esc(sc.name)} <small>${sc.elems.length} стрижн.${R ? ` · max U = ${f(sc.uMax, 3)}` : ''}</small></h3>
+        ${SC.drawings.section(mdl, sc, R)}
+        ${R ? P.sectionMemberTable(c, sc) : ''}</section>`).join('');
+      return `<h2>Секції каркаса</h2>
+      <p class="lead">Каркас поділено на розрахункові секції: <b>Я</b> — яруси ядра між рівнями (стійки, зв'язки ярусу й верхній пояс), <b>К</b> — консолі частин скульптури, <b>Д</b> — додаткові елементи. Кожен стрижень має марку «секція-роль№»: С — стійка, Р — розкіс/зв'язок, П — пояс, К — консоль. Наприклад, <b>Я2-Р3</b> — третій розкіс другого ярусу. Модель розраховується цілком (МСЕ), а результати й креслення подаються по секціях, щоб не заплутатися.</p>
+      ${c.staleBanner ? c.staleBanner() : ''}
+      <section class="card"><h3>3D: секції кольорами</h3>
+        <div class="viewer"><canvas id="cvSect"></canvas>
+          <div class="ctl"><label for="sectHlSel">Секція</label><select id="sectHlSel"><option value="">усі</option>${list.map(sc => `<option value="${sc.code}" ${ui.hl === sc.code ? 'selected' : ''}>${sc.code} — ${esc(sc.name)}</option>`).join('')}</select>
+          <label><input type="checkbox" id="sectMarks" ${ui.marks ? 'checked' : ''}> марки</label></div>
+          <div class="legend">${list.map(sc => `<span><i style="background:${sc.color}"></i>${sc.code}</span>`).join('')}</div></div></section>
+      ${card('Підсумок по секціях', summary)}
+      ${sheets}`;
+    },
+    after(c) {
+      const cv = document.getElementById('cvSect'); if (!cv) return;
+      const R = c.state.R && c.state.R.ok ? c.state.R : null, ui = c.state.ui.sects;
+      const mdl = R ? R.mdl : SC.model.build(c.state.pr);
+      const v = SC.view3d.create(cv, () => ({ nodes: R ? R.P.model.nodes : mdl.nodes, elems: mdl.elems, parts: [], colorBy: 'sect', sections: mdl.sections, sectLabels: true, marks: ui.marks && !!ui.hl, highlight: ui.hl }));
+      v.draw(); P.sects.view = v;
+    },
+    resize() { if (P.sects.view) P.sects.view.draw(); },
+    onChange(e, c) {
+      if (e.target.id === 'sectHlSel') { c.state.ui.sects.hl = e.target.value; c.render(); return true; }
+      if (e.target.id === 'sectMarks') { c.state.ui.sects.marks = e.target.checked; c.render(); return true; }
+      return false;
+    },
+    onAct(a, b, c) { if (a === 'sectHl') { c.state.ui.sects.hl = c.state.ui.sects.hl === b.dataset.c ? '' : b.dataset.c; c.render(); return true; } return false; },
   };
 
   /** Детальна перевірка перерізу з формулами (використовується і на сторінці, і в калькуляторі). */

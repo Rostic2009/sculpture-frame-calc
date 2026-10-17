@@ -257,8 +257,75 @@
         }
       }
     }
-    return { tris: Float64Array.from(tris), assumed, slices: slices.filter(Boolean).length, zTop, zBot };
+    // профіль по висоті: габарит перерізу (об'єднання еліпсів шару) — для вписування ядра каркаса в оболонку
+    const prof = slices.filter(Boolean).map(S => ({ z: S.z, x0: Math.min(...S.ell.map(e => e.cx - e.a)), x1: Math.max(...S.ell.map(e => e.cx + e.a)), y0: Math.min(...S.ell.map(e => e.cy - e.b)), y1: Math.max(...S.ell.map(e => e.cy + e.b)), n: S.ell.length }));
+    return { tris: Float64Array.from(tris), assumed, slices: slices.filter(Boolean).length, zTop, zBot, prof };
   };
+
+  /**
+   * Аналіз відновленої геометрії та пропозиція каркаса (без API — детерміновані правила).
+   *  parts: [{name, kind, c:[x,y,z], z1, z2, H, area, Ax, Ay, Ah, prof, assumed}]
+   *  Ядро вписується в найвужчий переріз «несучої» частини (тулуб/плащ) із зазором clear
+   *  (лист + ребра допоміжного каркаса); рівні — крок ≤ step і висоти кріплення консолей.
+   */
+  V.describe = function (parts, opts) {
+    opts = opts || {};
+    const clear = opts.clear != null ? opts.clear : 0.08, step = opts.step || 1.5;
+    if (!parts || !parts.length) return null;
+    const H = Math.max(...parts.map(p => p.z2));
+    const all = parts.flatMap(p => p.prof || []);
+    const X0 = Math.min(...all.map(q => q.x0)), X1 = Math.max(...all.map(q => q.x1)), Y0 = Math.min(...all.map(q => q.y0)), Y1 = Math.max(...all.map(q => q.y1));
+    const Atot = parts.reduce((a, p) => a + (p.area || 0), 0);
+    const cg = [0, 1, 2].map(k => parts.reduce((a, p) => a + (p.area || 0) * p.c[k], 0) / Math.max(Atot, 1e-9));
+    // несуча (вертикальна) частина: найвища з найбільшою площею серед тих, що стоять на основі
+    const grounded = parts.filter(p => p.z1 < 0.15 * H);
+    const body = (grounded.length ? grounded : parts).reduce((m, p) => (!m || p.H * (p.area || 1) > m.H * (m.area || 1) ? p : m), null);
+    const prof = (body.prof || []).filter(q => q.z >= 0.02 * H);
+    const inner = prof.map(q => ({ z: q.z, wx: q.x1 - q.x0 - 2 * clear, wy: q.y1 - q.y0 - 2 * clear, cx: (q.x0 + q.x1) / 2, cy: (q.y0 + q.y1) / 2 }));
+    const zTopCore = Math.max(0.5, Math.min(body.z2, H) - Math.max(0.15, 0.04 * H));
+    const band = (z0, z1) => inner.filter(q => q.z >= z0 && q.z <= z1);
+    const minOf = (arr, k) => arr.length ? Math.min(...arr.map(q => q[k])) : NaN;
+    const low = band(0, zTopCore * 0.5), high = band(zTopCore * 0.5, zTopCore);
+    const r05 = v => Math.floor(v * 20) / 20;
+    const wxL = minOf(low, 'wx'), wyL = minOf(low, 'wy'), wxH = minOf(high, 'wx'), wyH = minOf(high, 'wy');
+    const fit = Math.min(wxL, wyL, wxH, wyH);
+    const cants = parts.filter(p => p !== body).map(p => ({ p, r: Math.hypot(p.c[0] - body.c[0], p.c[1] - body.c[1]), z: p.c[2] })).sort((a, b) => b.r - a.r);
+    // схема ядра
+    let type, a, b, aTop, bTop, why;
+    if (!isFinite(fit) || fit < 0.3) {
+      type = 'single'; a = b = aTop = bTop = 0.4;
+      why = `найвужчий внутрішній переріз оболонки ${isFinite(fit) ? Math.round(fit * 1000) + ' мм' : 'не визначено'} < 300 мм — просторове ядро не вміщується, прийнято одну консольну стійку`;
+    } else {
+      type = 'core4';
+      a = Math.min(1.2, Math.max(0.3, r05(0.85 * Math.min(wxL, wxH > 0 ? wxL : wxL)))); b = Math.min(1.2, Math.max(0.3, r05(0.85 * wyL)));
+      aTop = Math.min(a, Math.max(0.25, r05(0.85 * wxH))); bTop = Math.min(b, Math.max(0.25, r05(0.85 * wyH)));
+      why = `чотиригранне ядро вписано в найвужчий внутрішній переріз оболонки (з зазором ${Math.round(clear * 1000)} мм на лист і ребра): унизу ${Math.round(wxL * 1000)}×${Math.round(wyL * 1000)} мм, угорі ${Math.round(wxH * 1000)}×${Math.round(wyH * 1000)} мм; план ядра прийнято 85 % від просвіту`;
+    }
+    // рівні: рівномірний крок ≤ step + рівні на висотах консолей (консоль виходить з вузла, а не з середини стійки)
+    const n = Math.max(2, Math.ceil(zTopCore / step));
+    let levels = Array.from({ length: n + 1 }, (_, i) => +(zTopCore * i / n).toFixed(2));
+    for (const ct of cants) {
+      const z = Math.min(zTopCore, Math.max(0.3, ct.z));
+      if (z < zTopCore - 0.05 && levels.every(L => Math.abs(L - z) > 0.35)) levels.push(+z.toFixed(2));
+    }
+    levels = [...new Set(levels)].sort((x, y) => x - y);
+    const secPost = H < 3 ? '□80×4' : H < 6 ? '□100×5' : H < 9 ? '□120×6' : '□140×6';
+    const secBrace = H < 6 ? '□50×3' : '□60×4', secRing = H < 6 ? '□60×4' : '□80×4';
+    const cantSec = r => r < 0.8 ? '□60×4' : r < 1.5 ? '□80×5' : '□100×5';
+    const slender = H / Math.max(0.1, Math.min(X1 - X0, Y1 - Y0));
+    const ecc = Math.hypot(cg[0], cg[1]);
+    const text = [
+      `Габарити скульптури: висота ${f2(H)} м, ширина (X) ${f2(X1 - X0)} м, глибина (Y) ${f2(Y1 - Y0)} м; гнучкість H/b = ${f2(slender)}.`,
+      `Частин: ${parts.length}. Площа поверхні оболонки ${f2(Atot)} м²; найбільша фронтальна площа парусності ${f2(Math.max(...parts.map(p => p.Ax || 0)))} м² (частина «${parts.reduce((m, p) => (p.Ax || 0) > (m.Ax || 0) ? p : m, parts[0]).name}»).`,
+      `Центр поверхні (≈ центр мас оболонки): x = ${f2(cg[0])}, y = ${f2(cg[1])}, z = ${f2(cg[2])} м; ексцентриситет у плані ${Math.round(ecc * 1000)} мм — ${ecc > 0.1 * Math.min(X1 - X0, Y1 - Y0) ? 'суттєвий: власна вага створює постійний момент на фундамент' : 'малий: власна вага передається майже центрально'}.`,
+      `Несуча частина — «${body.name}» (z = ${f2(body.z1)}…${f2(body.z2)} м)${body.assumed ? ', глибина припущена — уточніть боковим видом' : ''}.`,
+      cants.some(ct => ct.r >= 0.2) ? `Виноси в плані: ${cants.filter(ct => ct.r >= 0.2).map(ct => `«${ct.p.name}» ${Math.round(ct.r * 1000)} мм на висоті ${f2(ct.z)} м`).join('; ')}. Найбільший винос визначає згин консолі й крутний момент на ядро.` : 'Виносних частин у плані немає.',
+      cants.some(ct => ct.r < 0.2) ? `Над ядром (вертикальні консолі): ${cants.filter(ct => ct.r < 0.2).map(ct => `«${ct.p.name}» — центр на ${f2(Math.max(0, ct.z - zTopCore))} м вище верху ядра`).join('; ')}.` : '',
+      `Пропозиція каркаса: ${why}. Рівні поясів: ${levels.map(f2).join('; ')} м (крок ≤ ${f2(step)} м${levels.length > n + 1 ? ', додано рівні на висотах кріплення консолей' : ''}). Початкові перерізи: стійки ${secPost}, пояси ${secRing}, зв'язки ${secBrace}; остаточно — автоматичним підбором після розрахунку.`,
+    ];
+    return { H, B: X1 - X0, D: Y1 - Y0, Atot, cg, ecc, body: body.name, fit, frame: { type, a, b, aTop, bTop, levels, bracing: type === 'single' ? 'none' : 'X', secPost, secRing, secBrace }, cants: cants.map(ct => ({ name: ct.p.name, r: ct.r, z: ct.z, vertical: ct.r < 0.2, sec: cantSec(Math.max(ct.r, ct.z - zTopCore)) })), text: text.filter(Boolean) };
+  };
+  const f2 = v => (Math.round(v * 100) / 100).toLocaleString('uk-UA');
 
   /** IoU силуету: проєкція сітки на фронтальний вид проти маски мітки. */
   V.iouFront = function (tris, front, label) {
