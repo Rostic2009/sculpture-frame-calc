@@ -177,33 +177,55 @@
     if (main.nc) W('warn', `${main.nc} сполучень: ітерації 2-го порядку не досягли точності 1e-4.`, 'fem');
     if (eqMax > 1e-6) W('warn', `Нев'язка рівноваги ${eqMax.toExponential(2)} перевищує 1e-6.`, 'fem');
 
-    // ---------- 4. сейсміка ----------
+    // ---------- 4. сейсміка: ДБН В.1.1-12:2025, спектральний метод ----------
+    // Відгуки рахуються при a₀ = 1, γpl = 1 для трьох напрямків (X, Y, Z); форми — SRSS; напрямки — SRSS (п. 7.4.13, несиметрична споруда).
+    // Розрахункові множники (ф. 7.3): каркас — γn·γI·γpl·a₀/m; анкери, закладні, загальна стійкість — γpl = 1 (табл. 7.4, р. 1).
     let seis = null;
-    if (pr.site.seismic.on && clim.seis.a0 > 0) {
+    const body = (pr.parts || []).filter(p => p.kind !== 'cant').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null);
+    const Bw = body ? Math.min(body.Ax, body.Ay) / Math.max(0.1, (body.z2 || 1) - (body.z1 || 0)) : Math.min(pr.frame.a, pr.frame.b);
+    const seisSite = N.seismicSite(pr.site.seismic, pr.site.cc, Hsc, Bw);
+    seisSite.notes.forEach(t => W('error', 'Сейсміка: ' + t + '.', 'seis'));
+    if (pr.site.seismic.on && seisSite.required) {
       const masses = SC.loads.seismicMasses(cases, P, clim);
-      const modal = SC.fem.modal(P, masses, pr.site.seismic.nModes || 8);
+      const modal = SC.fem.modal(P, masses, pr.site.seismic.nModes || 12);
       const kc = N.seismicComb;
-      const staticLoad = SC.loads.combine([{ c: cases.G, k: kc.G * gG }, { c: cases.S, k: kc.snow * clim.gfmS }]);
+      const staticLoad = SC.loads.combine([{ c: cases.G, k: kc.G * gN }, { c: cases.S, k: kc.snow * gN }]);
       const rs = SC.fem.solve(P, staticLoad, { second: false });
-      const res = [];
       const sumMeff = [0, 1, 2].map(d => modal.modes.reduce((s, m) => s + m.meff[d], 0));
-      for (const D of [{ d: 0, name: 'X' }, { d: 1, name: 'Y' }]) {
-        const modeLoads = SC.loads.seismicModalLoads(P, masses, modal, clim, D.d);
-        const vert = pr.site.seismic.vertical ? SC.loads.seismicModalLoads(P, masses, modal, clim, 2, 0.7) : [];
-        const resp = modeLoads.concat(vert).map(ml => { const r = SC.fem.solve(P, ml.load); return { ml, r, forces: stationForces(P, r, stations) }; });
+      // яруси ядра для перекосів (табл. 7.5)
+      const tiers = mdl.levelNodes.slice(1).map((L, li) => ({ li, dz: L.z - mdl.levelNodes[li].z, pairs: L.ids.map((id, k) => [P.idx.get(mdl.levelNodes[li].ids[k]), P.idx.get(id)]) }));
+      const driftOf = u => tiers.map(t => Math.max(...t.pairs.map(([a, b]) => Math.hypot(u[b * 6] - u[a * 6], u[b * 6 + 1] - u[a * 6 + 1]))) / t.dz);
+      const dirs = [{ d: 0, name: 'X', f: 1 }, { d: 1, name: 'Y', f: 1 }].concat(pr.site.seismic.vertical ? [{ d: 2, name: 'Z', f: 1 }] : []);
+      const res = [];
+      for (const D of dirs) {
+        const modeLoads = SC.loads.seismicModalLoads(P, masses, modal, clim, D.d, D.f);
+        const resp = modeLoads.map(ml => { const r = SC.fem.solve(P, ml.load); return { ml, r, forces: stationForces(P, r, stations), drift: driftOf(r.u) }; });
         const env = srss(resp.map(x => x.forces));
         const renv = srssReactions(resp.map(x => x.r.reactions));
         const uenv = srssArr(resp.map(x => x.r.u));
-        const shear = resp.filter(x => modeLoads.includes(x.ml)).map(x => ({ mode: x.ml.mode, T: x.ml.T, beta: x.ml.beta, Sa: x.ml.Sa, meff: x.ml.meff, base: x.r.reactions.reduce((s, rr) => s + rr.r[D.d], 0) }));
-        res.push({ dir: D.name, d: D.d, env, renv, uenv, modes: shear });
+        const drift = tiers.map((t, ti) => Math.sqrt(resp.reduce((a, x) => a + x.drift[ti] ** 2, 0)));
+        const shear = resp.map(x => ({ mode: x.ml.mode, T: x.ml.T, beta: x.ml.beta, meff: x.ml.meff, base: x.r.reactions.reduce((s, rr) => s + rr.r[D.d], 0) }));
+        res.push({ dir: D.name, d: D.d, env, renv, uenv, drift, modes: shear });
       }
-      seis = { modal, masses, staticR: rs, staticForces: stationForces(P, rs, stations), res, sumMeff, totalMass: masses.reduce((a, b) => a + b, 0) };
-      if (sumMeff[0] < 0.9 || sumMeff[1] < 0.9) W('warn', `Сума ефективних мас врахованих форм: X ${(sumMeff[0] * 100).toFixed(0)} %, Y ${(sumMeff[1] * 100).toFixed(0)} % (< 90 %). Збільшіть кількість форм.`, 'seis');
-      W('info', 'Сейсмічний модуль реалізує структуру спектрального методу ДБН В.1.1-12:2014. З 01.07.2026 діє нова редакція ДБН — звірте k₁, k₂, k_гр, k_ψ і β(T).', 'seis');
-    }
+      // SRSS за напрямками (п. 7.4.13)
+      const envU = res[0].env.map((st, k) => st.map((f0, si) => { const o = {}; for (const key in f0) o[key] = Math.sqrt(res.reduce((a, R) => a + R.env[k][si][key] ** 2, 0)); return o; }));
+      const renvU = new Map(); for (const [id] of res[0].renv) renvU.set(id, [0, 1, 2, 3, 4, 5].map(i => Math.sqrt(res.reduce((a, R) => a + R.renv.get(id)[i] ** 2, 0))));
+      const driftU = tiers.map((t, ti) => Math.sqrt(res.reduce((a, R) => a + R.drift[ti] ** 2, 0)));
+      // множники рівнів впливу
+      const gI = seisSite.gammaI;
+      const lev = seisSite.levels.map(L => Object.assign({}, L, { gpl: N.gammaPlOf(seisSite.damage, L.I), kFrame: L.a0 * N.gammaPlOf(seisSite.damage, L.I) * gI * gN, kFix: L.a0 * 1.0 * gI * gN, drift: driftU.map(d => d * L.a0 * gI), lim: N.seismicDrift[L.ER] }));
+      lev.forEach(L => { L.driftMax = Math.max(0, ...L.drift); L.uDrift = L.driftMax / L.lim; });
+      const ulsLev = lev.filter(L => L.uls && L.a0 > 0);
+      const govF = ulsLev.reduce((m, L) => (!m || L.kFrame > m.kFrame ? L : m), null), govX = ulsLev.reduce((m, L) => (!m || L.kFix > m.kFix ? L : m), null);
+      seis = { site: seisSite, modal, masses, staticR: rs, staticForces: stationForces(P, rs, stations), res, envU, renvU, driftU, tiers, levels: lev, gammaI: gI,
+        kFrame: govF ? govF.kFrame : 0, kFix: govX ? govX.kFix : 0, govFrame: govF, govFix: govX, sumMeff, totalMass: masses.reduce((a, b) => a + b, 0) };
+      if (sumMeff[0] < 0.9 || sumMeff[1] < 0.9) W('warn', `Сума ефективних мас врахованих форм: X ${(sumMeff[0] * 100).toFixed(0)} %, Y ${(sumMeff[1] * 100).toFixed(0)} % (< 90 %) — збільшіть кількість форм (п. 7.4.10: враховувати всі форми зі значним внеском).`, 'seis');
+      lev.forEach(L => { if (L.a0 > 0 && L.uDrift > 1) W('error', `Сейсміка, ${L.id} (ЕР ${L.ER}): перекіс ярусу ${L.driftMax.toFixed(4)} > ${L.lim} (табл. 7.5, сталевий каркас).`, 'seis'); });
+      W('info', `Сейсміка за ДБН В.1.1-12:2025: ЕГ ${seisSite.EG}; ${lev.filter(L => L.a0 > 0).map(L => `${L.id} — ${L.I} бал., a₀ = ${L.a0}g, ЕР ${L.ER}`).join('; ')}; γI = ${gI} (${seisSite.gIsrc}). Формулу S_ik спектрального методу прийнято за ДБН В.1.2-6 (структура попередньої редакції без k₁, k₂, k_гр, k_ψ).`, 'seis');
+    } else if (pr.site.seismic.on) W('info', `Сейсміка: за картами ЗСР-2004 з урахуванням ґрунту ${seisSite.soil} категорії розрахункова інтенсивність менше 6 балів на всіх рівнях — сейсмічні вимоги не застосовуються (п. 5.1).`, 'seis');
 
     // ---------- 5. перевірки елементів ----------
-    const kcStr = () => `${N.seismicComb.G}·G + ${N.seismicComb.snow}·S`;
+    const kcStr = () => `${fmt(N.seismicComb.G)}·G + ${fmt(N.seismicComb.snow)}·S`;
     const memberRes = mdl.elems.map((e, k) => {
       const el = P.els[k];
       const Lsys = systemLength(e, el, mdl, pr);
@@ -216,15 +238,20 @@
         return u;
       };
       for (const s of solved) { let um = 0; s.forces[k].forEach((f, si) => { um = Math.max(um, consider(f, s.cb.id + ': ' + s.cb.name, stations[si], s.cb.id)); }); all.push({ id: s.cb.id, u: um }); }
-      if (seis) for (const R of seis.res) seis.staticForces[k].forEach((fs, si) => {
-        const fe = R.env[k][si];
-        for (const sN of [1, -1]) for (const sY of [1, -1]) for (const sZ of [1, -1]) consider({ N: fs.N + sN * fe.N, Vy: Math.abs(fs.Vy) + fe.Vy, Vz: Math.abs(fs.Vz) + fe.Vz, T: Math.abs(fs.T) + fe.T, My: fs.My + sY * fe.My, Mz: fs.Mz + sZ * fe.Mz }, `E${R.dir}: ${kcStr()} ± E${R.dir}`, stations[si], 'E' + R.dir);
-      });
+      if (seis && seis.kFrame > 0) {
+        // m (табл. 7.7): стійкість — за гнучкістю (1,2 при λ ≤ 20 … 1,0 при λ ≥ 100), міцність — 1,3; приймається менше (у запас)
+        const mE = Math.min(N.seismicM.steelStrength, N.seismicM.stabilityByLambda(Lsys.Lcr / e.sec.i));
+        const kE = seis.kFrame / mE;
+        seis.staticForces[k].forEach((fs, si) => {
+          const fe = seis.envU[k][si];
+          for (const sN of [1, -1]) for (const sY of [1, -1]) for (const sZ of [1, -1]) consider({ N: fs.N + sN * kE * fe.N, Vy: Math.abs(fs.Vy) + kE * fe.Vy, Vz: Math.abs(fs.Vz) + kE * fe.Vz, T: Math.abs(fs.T) + kE * fe.T, My: fs.My + sY * kE * fe.My, Mz: fs.Mz + sZ * kE * fe.Mz }, `E: ${kcStr()} ± ${seis.govFrame.id} (γI·γpl·a₀/m = ${(kE / gN).toFixed(4)}g)`, stations[si], 'E');
+        });
+      }
       const lam = Lsys.Lcr / e.sec.i;
       const kind = e.type === 'truss' ? 'brace' : (e.group === 'Стійки ядра' ? 'main' : 'second');
       return { e, k, L: el.L, Lsys, lam, lamLim: SC.checks.lambdaLimit(kind, best.u), best, mass: e.sec.mass * el.L, byCombo: all };
     });
-    memberRes.forEach(m => { if (m.lam > m.lamLim) W('warn', `${m.e.id} (${m.e.group}): гнучкість λ = ${m.lam.toFixed(0)} > ${m.lamLim.toFixed(0)}.`, 'members'); });
+    memberRes.forEach(m => { if (m.lam > m.lamLim) W('warn', `${m.e.id} (${m.e.group}): гнучкість λ = ${m.lam.toFixed(0)} > λu = ${m.lamLim.toFixed(0)} (ДБН В.2.6-198, Зміна № 1, п. 13.4.1) — потрібна перевірка на транспортування і монтаж (п. 13.4.2) або більший переріз.`, 'members'); });
     // результати по секціях (ярус ядра, консоль): довжина, маса, визначальний стрижень
     const sectionRes = (mdl.sections || []).map(sc => {
       const ms = memberRes.filter(m => m.e.sect === sc.code);
@@ -278,9 +305,10 @@
         if (u > best.u) best = { u, b, r, combo: name };
       };
       for (const s of solved) { const rr = s.r.reactions.find(x => x.node === nd.id); if (rr) consider(rr.r, s.cb.id + ': ' + s.cb.name); }
-      if (seis) for (const R of seis.res) {
-        const r0 = seis.staticR.reactions.find(x => x.node === nd.id).r, re = R.renv.get(nd.id);
-        for (const s1 of [1, -1]) for (const s2 of [1, -1]) for (const s3 of [1, -1]) consider([r0[0] + s1 * re[0], r0[1] + s1 * re[1], r0[2] + s2 * re[2], r0[3] + s3 * re[3], r0[4] + s3 * re[4], r0[5] + s1 * re[5]], `E${R.dir}`);
+      if (seis && seis.kFix > 0) {
+        // анкери, закладні деталі: γpl = 1 (табл. 7.4, р. 1); m = 1,0 (шви; у запас для болтів 1,1)
+        const r0 = seis.staticR.reactions.find(x => x.node === nd.id).r, re = seis.renvU.get(nd.id).map(v => v * seis.kFix);
+        for (const s1 of [1, -1]) for (const s2 of [1, -1]) for (const s3 of [1, -1]) consider([r0[0] + s1 * re[0], r0[1] + s1 * re[1], r0[2] + s2 * re[2], r0[3] + s3 * re[3], r0[4] + s3 * re[4], r0[5] + s1 * re[5]], `E: ${kcStr()} ± ${seis.govFix.id} (γpl = 1, табл. 7.4)`);
       }
       // класифікація бази за жорсткістю (EN 1993-1-8, 5.2.2.5)
       const Lc = mdl.posts === 1 ? mdl.H : (mdl.levels[1] || mdl.H);
@@ -295,20 +323,21 @@
     if (pr.base.flex !== 'iter' && supportRes.some(s => s.best.cls !== 'жорстка')) W('warn', 'База не класифікується як жорстка, а каркас розраховано з жорстким закріпленням — увімкніть «Податливість бази: ітераційно».', 'base');
 
     // ---------- 10. фундамент ----------
-    const fd = Object.assign({}, pr.found);
+    const fd = Object.assign({}, pr.found, { gammaN: pr.site.gammaN || 1 });
     const supPos = id => { const n = P.model.nodes[P.idx.get(id)]; return { x: n.x, y: n.y }; };
     const soil = fd.soilMode === 'calc' ? SC.concrete.soilRLayer(fd) : null;
     const Rsoil = fd.soilMode === 'calc' ? soil.R : fd.R;
     const fSls = [], fUls = [];
     for (const cb of sls) { if (!cb.r) continue; const res = SC.found.resultant(fd, cb.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), 1.0); fSls.push({ cb, res, chk: SC.found.check(fd, res, Rsoil, 'sls') }); }
     for (const s of solved) { const kG = s.cb.favourable ? 0.9 : 1.1; const res = SC.found.resultant(fd, s.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), kG); const chk = SC.found.check(fd, res, Rsoil, 'uls'); chk.res = res; fUls.push({ cb: s.cb, res, chk }); }
-    if (seis) for (const R of seis.res) for (const s1 of [1, -1]) {
-      const rr = seis.staticR.reactions.map(x => { const re = R.renv.get(x.node); return Object.assign(supPos(x.node), { r: x.r.map((v, i) => v + s1 * re[i]) }); });
-      const res = SC.found.resultant(fd, rr, 0.9);
+    if (seis && seis.kFix > 0) for (const s1 of [1, -1]) {
+      // загальна стійкість (перекидання, зсув) і тиск: γpl = 1 (табл. 7.4, р. 1), вага з коефіцієнтом 1,0 (ф. 7.3), вертикальна складова — п. 7.4.18
+      const rr = seis.staticR.reactions.map(x => { const re = seis.renvU.get(x.node); return Object.assign(supPos(x.node), { r: x.r.map((v, i) => v + s1 * re[i] * seis.kFix * (i === 2 ? -1 : 1)) }); });
+      const res = SC.found.resultant(fd, rr, 1.0);
       const chk = SC.found.check(fd, res, Rsoil, 'uls'); chk.res = res;
-      fUls.push({ cb: { id: `E${R.dir}${s1 > 0 ? '+' : '−'}`, name: `особливе сполучення, сейсміка ${R.dir}` }, res, chk });
+      fUls.push({ cb: { id: `E${s1 > 0 ? '+' : '−'}`, name: `сейсмічна ситуація ${seis.govFix.id}: 1,0·G + 0,5·S ± E (ф. 7.3)` }, res, chk });
     }
-    const govSls = fSls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fSls[0]);
+    let govSls = fSls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fSls[0]);
     const govUls = fUls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fUls[0]);
     const slab = SC.concrete.slab(fd, fUls.filter(x => !x.cb.favourable).map(x => ({ p: x.chk.p, res: x.res, name: x.cb.id })), fSls.filter(x => x.cb.quasi).map(x => ({ p: x.chk.p, res: x.res, name: x.cb.id })));
     // осідання і крен — від найбільшого середнього тиску SLS та найбільшого моменту
@@ -319,6 +348,10 @@
     const edgeZone = SC.concrete.edgeZone(fd, govSls.chk.p.pmax);
     if (edgeZone.H0 > 0) { const s1 = settle; settle = SC.concrete.settlement(fd, sMean.chk.p.pmean, sMom.res.Mx, sMom.res.My, { H0: edgeZone.H0 }); settle.sLinear = s1.s; W('info', `Під краями підошви утворюється зона руйнування ґрунту глибиною H₀ = ${(edgeZone.H0 * 1000).toFixed(0)} мм (Барвашов, за Пузиревським); осідання уточнено: ${(s1.s * 1000).toFixed(1)} → ${(settle.s * 1000).toFixed(1)} мм.`, 'found'); }
     settle.edgeZone = edgeZone;
+    // п. 8.6.9: при s ≤ 0,4s_u середній тиск допускається до 1,2R — перевірки II групи уточнюються після розрахунку осідань
+    fd.sRatio = settle.s / (fd.sLim || 0.2);
+    for (const x of fSls) x.chk = SC.found.check(fd, x.res, Rsoil, 'sls');
+    govSls = fSls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fSls[0]);
     settle.uS = settle.s / (fd.sLim || 0.1); settle.uT = settle.tilt / (fd.tiltLim || 0.004);
     // підколонник
     const pedN = Math.min(...fUls.map(x => -x.res.Fz));
@@ -328,7 +361,17 @@
     const nA = (pr.base.nAnchor || 4);
     const rebar = SC.concrete.schedule(fd, slab, ped, pr.base.anchorReinf, supNodes.length, nA);
     if (govSls && govSls.chk.max > 1) W('error', `Фундамент: тиск під підошвою не проходить (U = ${govSls.chk.max.toFixed(2)}, ${govSls.cb.name}).`, 'found');
-    if (govUls && govUls.chk.max > 1) W('error', `Фундамент: перекидання/зсув не забезпечено (U = ${govUls.chk.max.toFixed(2)}, ${govUls.cb.name}).`, 'found');
+    if (govUls && govUls.chk.max > 1) W('error', `Фундамент: несуча здатність основи, перекидання або зсув не забезпечено (ДБН В.2.1-10, п. 8.9; U = ${govUls.chk.max.toFixed(2)}, ${govUls.cb.name}).`, 'found');
+    // сейсміка, табл. 7.8: продавлювання монолітної плити в сейсмічній ситуації — E_d/R_d ≤ s (s +20 % при 7–9 балах)
+    if (seis && seis.kFix > 0) {
+      const eL = fUls.filter(x => /^E/.test(x.cb.id) && x.chk.p);
+      if (eL.length) {
+        const slabE = SC.concrete.slab(fd, eL.map(x => ({ p: x.chk.p, res: x.res, name: x.cb.id })), []);
+        const Iref = seis.govFix.I, sv = (N.seismicS[Math.min(9, Math.max(6, Iref))] || 0.95) * (Iref >= 7 ? 1.2 : 1);
+        slab.seis = { s: Math.min(1, sv), I: Iref, punching: slabE.punching / Math.min(1, sv), shear: Math.max(slabE.shearX, slabE.shearY) / Math.min(1, sv) };
+        if (slab.seis.punching > 1) W('error', `Продавлювання плити в сейсмічній ситуації: v_Ed/v_Rd,c = ${slabE.punching.toFixed(2)} > s = ${slab.seis.s.toFixed(2)} (ДБН В.1.1-12:2025, табл. 7.8).`, 'found');
+      }
+    }
     // масивність плити: виліт a_v від грані підколонника до робочої висоти d (EN 1992-1-1, 6.2.2(6), 6.5; Гоцуляк, Войтенко, 2011)
     slab.av = Math.min(fd.B - fd.pedB, fd.L - fd.pedL) / 2; slab.avd = slab.av / Math.max(slab.dBot || 0.5, 0.05); slab.deep = slab.avd <= 2;
     if (slab.deep) W('info', `Фундаментна плита масивна: a_v/d = ${slab.avd.toFixed(2)} ≤ 2 — зусилля передаються стиснутими «підкосами» через товщину плити; армування, підібране за згином консолі (теорія пластин), іде в запас. Уточнення — тривимірна модель або модель «підкіс–затяжка» (EN 1992-1-1, 6.5).`, 'found');

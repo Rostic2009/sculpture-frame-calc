@@ -148,6 +148,9 @@
       if (t.dataset.min != null && v < +t.dataset.min) toast(`Значення менше допустимого мінімуму ${t.dataset.min}.`);
       set(state.pr, t.dataset.path, v);
       const p = t.dataset.path;
+      if (/^site\.seismic\.[ABC]$/.test(p) && !(v >= 6)) set(state.pr, p, null);
+      if (p === 'site.seismic.place') { const sp = N.seisPlaceByName(v); if (sp) Object.assign(state.pr.site.seismic, { A: sp.A, B: sp.B, C: sp.C }); }
+      if (p === 'site.city') { const sp = N.seisPlaceByName(v); if (sp) Object.assign(state.pr.site.seismic, { place: sp.name, A: sp.A, B: sp.B, C: sp.C }); else Object.assign(state.pr.site.seismic, { place: '' }); }
       if (p === 'site.city') { const c = N.cityByName(v); if (c) { state.pr.site.W0 = c.W0; state.pr.site.S0 = c.S0; if (state.pr.site.ice.mode !== 'manual') { state.pr.site.ice.b = c.b; state.pr.site.ice.WB = c.WB; } state.pr.meta.location = 'м. ' + c.name.split(' (')[0]; } }
       if (p === 'site.windDistrict') state.pr.site.W0 = N.windDistricts.find(d => d.id === v).W0;
       if (p === 'site.snowDistrict') state.pr.site.S0 = N.snowDistricts.find(d => d.id === v).S0;

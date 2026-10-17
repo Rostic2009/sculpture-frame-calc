@@ -87,6 +87,19 @@
     ck('ДБН: θ₄ = 0,05·ρ·S·k·k₁ (ρ = 0,7, гориз.), °C', norms.tempClimate({ rho: 0.7 }).th4, 0.05 * 0.7 * 890 * 0.7, 1e-9, 'ф. (11.3)');
     ck('ДБН: Δt_c = t_ec − 0,5θ₁ − t_0w = −39 °C', norms.tempClimate({}).dTc, -39, 1e-9, 'табл. 11.1, ф. (11.2)');
     ck('ДБН: Додаток Е, Львів W₀ = 520 Па', norms.cityByName('Львів').W0, 520, 1e-9, 'Додаток Е');
+    // ДБН В.1.1-12:2025
+    ck('Сейсміка: β(ґрунт II, T = 1 с) = 1,8/T^(2/3)', norms.seismicBeta(1, 'II'), 1.8, 1e-9, 'табл. 6.3');
+    ck('Сейсміка: β(ґрунт III, T = 2 с) = 3/T', norms.seismicBeta(2, 'III'), 1.5, 1e-9, 'табл. 6.3');
+    ck('Сейсміка: β ≥ 0,8 (ґрунт III, T = 5 с)', norms.seismicBeta(5, 'III'), 0.8, 1e-9, 'табл. 6.3, примітка');
+    const sIz = norms.seismicSite({ A: 8, B: 9, C: 9, soil: 'III', place: 'Ізмаїл', damage: 'steel' }, 'CC2', 6, 2);
+    ck('Сейсміка: Ізмаїл, ґрунт III (прим. **) — ПЗ за табл. 6.2 (8/9) a₀', sIz.levels.find(L => L.id === 'ПЗ').a0, 0.30, 1e-9, 'табл. 6.2, А.1');
+    const sLv = norms.seismicSite({ A: 6, B: 6, C: 7, soil: 'III', damage: 'steel' }, 'CC2', 6, 2);
+    ck('Сейсміка: Львів, ґрунт III → 7/7 бал., a₀ = 0,10', sLv.levels.find(L => L.id === 'ПЗ').a0, 0.10, 1e-9, 'табл. 6.1, 6.2');
+    ck('Сейсміка: γpl сталевого каркаса при 9 балах = 0,3', norms.gammaPlOf('steel', 9), 0.3, 1e-9, 'табл. 7.4');
+    ck('Сейсміка: m стійкості при λ = 60 = 1,1', norms.seismicM.stabilityByLambda(60), 1.1, 1e-9, 'табл. 7.7');
+    // ДБН В.2.6-198, Зміна № 1
+    ck('Сталь: λu стиснутих = 200', SC.checks.lambdaLimit('main'), 200, 1e-9, 'Зміна № 1, п. 13.4.1');
+    ck('Сталь: λu розтягнутих = 400', SC.checks.lambdaLimit('tension'), 400, 1e-9, 'Зміна № 1, п. 13.4.1');
     return out;
   };
 })(typeof window !== 'undefined' ? (window.SC = window.SC || {}) : (global.SC = global.SC || {}));

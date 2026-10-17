@@ -95,7 +95,10 @@
 
     H(2, '1.2. Матеріал');
     s.push(F().tbl(['Параметр', 'Значення', 'Джерело'], [
-      ['Сталь труб', `${steel.id}: R<sub>yn</sub> = ${steel.Ryn} МПа, R<sub>un</sub> = ${steel.Run} МПа`, N.steelsMeta.src],
+      ['Сталь труб', `${steel.id}: R<sub>yn</sub> = ${steel.Ryn} МПа, R<sub>un</sub> = ${steel.Run} МПа${steel.grades ? ` (марки ${steel.grades} ≡ ${steel.dbn})` : ''}`, N.steelsMeta.src],
+      ['Клас виконання (EXC)', `${N.excClass(pr.site.cc, true)} — клас наслідків ${pr.site.cc}, динамічні впливи (вітер, вихрове збудження${pr.site.seismic && pr.site.seismic.on ? ', сейсміка' : ''})`, N.excMeta.src],
+      ['Гранична гнучкість λ<sub>u</sub>', '200 — стиснуті, 400 — розтягнуті елементи; при перевищенні — перевірка на транспортування і монтаж (п. 13.4.2)', SC.checks.lambdaMeta.src],
+      ['Корозія', 'Збільшення товщини стінок на корозію в розрахунку несучої здатності не враховується (п. 5.3.4 у ред. Зміни № 1); захист — за ДСТУ ISO 12944-3 (п. 17.1.4)', 'ДБН В.2.6-198, Зміна № 1'],
       ['Розрахунковий опір R<sub>y</sub> = R<sub>yn</sub>/γ<sub>m</sub>', `${f(steel.Ryn / (steel.norm === 'dbn' ? steel.gm : 1.025), 1)} МПа (γ<sub>m</sub> = ${steel.norm === 'dbn' ? steel.gm : 1.025})`, 'ДБН В.2.6-198'],
       ['Опір зрізу R<sub>s</sub> = 0,58R<sub>y</sub>', `${f(0.58 * steel.Ryn / (steel.norm === 'dbn' ? steel.gm : 1.025), 1)} МПа`, 'ДБН В.2.6-198'],
       ['Модуль пружності E', `${f(N.E / 1e9, 0)} ГПа`, 'ДБН В.2.6-198'],
@@ -132,7 +135,7 @@
       rows.push(row('Міцність: σ = |N|/A + |M<sub>y</sub>|/W + |M<sub>z</sub>|/W', `σ = ${f(k.dbn.sig / 1e6, 1)} МПа (N = ${kN(b.f.N)} кН, M = ${kN(Math.hypot(b.f.My, b.f.Mz))} кН·м)`, `R<sub>y</sub>γ<sub>c</sub> = ${f(Rgc / 1e6, 1)} МПа`, k.dbn.strength, 'ДБН В.2.6-198, р. 8', 'strength'));
       rows.push(row('Зріз і кручення: τ = V/A<sub>v</sub> + T/W<sub>t</sub>', `τ = ${f(k.dbn.tau / 1e6, 1)} МПа`, `R<sub>s</sub>γ<sub>c</sub> = ${f(k.dbn.Rs * k.dbn.gc / 1e6, 1)} МПа`, k.dbn.shear, 'ДБН В.2.6-198', 'shear'));
       if (k.Nc > 0) rows.push(row(`Стійкість (стиск зі згином), λ̄ = ${f(k.dbn.lamBar, 2)}, φ = ${f(k.dbn.phi, 3)}`, `N = ${kN(k.Nc)} кН`, `φAR<sub>y</sub>γ<sub>c</sub> = ${kN(k.dbn.phi * m.e.sec.A * Rgc)} кН (з урахуванням M)`, Math.max(k.dbn.stability, k.en.stability), 'ДБН В.2.6-198; EN 1993-1-1 (6.61)–(6.62)', 'stability'));
-      rows.push(row('Гнучкість λ = L<sub>cr</sub>/i', `λ = ${f(m.lam, 0)} (L<sub>cr</sub> = ${f(m.Lsys.Lcr, 2)} м)`, `λ<sub>u</sub> = ${f(m.lamLim, 0)}`, m.lam / m.lamLim, 'ДБН В.2.6-198, табл. 30–31', 'slender'));
+      rows.push(row('Гнучкість λ = L<sub>cr</sub>/i', `λ = ${f(m.lam, 0)} (L<sub>cr</sub> = ${f(m.Lsys.Lcr, 2)} м)`, `λ<sub>u</sub> = ${f(m.lamLim, 0)}`, m.lam / m.lamLim, 'ДБН В.2.6-198 зі Зміною № 1, п. 13.4.1', 'slender'));
     }
     rows.push(['<b>Каркас у цілому</b>', '', '', '', '', '', '']);
     rows.push(row('Горизонтальне переміщення верху (характеристичні навантаження)', `${f(R.uMax * 1000, 1)} мм (${esc(R.uCombo || '')})`, `H/${pr.design.defLimit} = ${f(R.uLim * 1000, 1)} мм`, R.uMax / R.uLim, 'завдання на проєктування; ДСТУ Б В.1.2-3', 'sls'));
@@ -228,6 +231,23 @@
     return s.join('\n');
   };
 
+  /** Сейсміка за ДБН В.1.1-12:2025: вихідні дані, рівні впливу, коефіцієнти, форми, поперечні сили, перекоси. */
+  RS.seismicBlock = function (R) {
+    const pr = R.pr, sz = pr.site.seismic, N = SC.norms;
+    const site = R.seis ? R.seis.site : N.seismicSite(sz, pr.site.cc, R.Htot, Math.min(pr.frame.a, pr.frame.b));
+    const s = [];
+    s.push(`<p>Населений пункт: <b>${esc(sz.place || '—')}</b>; бальність за картами ЗСР-2004 (Додаток А, ґрунти II категорії): А — ${sz.A || '< 6'}, В — ${sz.B || '< 6'}, С — ${sz.C || '< 6'}. Категорія ґрунту — ${site.soil} (табл. 6.1: розрахункова інтенсивність ${site.soil === 'I' ? 'на 1 бал менша' : site.soil === 'III' ? 'на 1 бал більша' : 'дорівнює картовій'}). Клас наслідків ${pr.site.cc} → експлуатаційна група ЕГ ${site.EG} (п. 7.2.2; скульптура — споруда).</p>`);
+    s.push(F().tbl(['Рівень впливу', 'Карта / джерело', 'Розрахункова інтенсивність, бал', 'a₀, g', 'Експлуатаційний рівень', 'γ<sub>pl</sub> каркаса (табл. 7.4)', 'Перевірка'], (R.seis ? R.seis.levels : site.levels).map(L => [`${L.id} — ${L.name}`, esc(L.src), L.I < 6 ? `${L.I} (< 6)` : L.I, f(L.a0, 2), `ЕР ${L.ER}`, L.gpl != null ? f(L.gpl, 2) : f(N.gammaPlOf(site.damage, L.I), 2), L.a0 <= 0 ? 'не потрібна' : (L.uls ? 'ULS (Ed ≤ Rd) + перекіс' : 'перекіс (SLS)')])));
+    s.push(`<p>Спектральний метод: S<sub>ik</sub> = m<sub>k</sub>·g·a₀·β<sub>i</sub>·η<sub>ik</sub>, η<sub>ik</sub>·m<sub>k</sub> = m<sub>k</sub>·φ<sub>ik</sub>·Γ<sub>i</sub>; β за табл. 6.3 (0,8 ≤ β ≤ 2,5), однаковий для горизонтальних і вертикальної складових (п. 6.2.2.3). Маси — за (7.1): ΣG<sub>k</sub> + 0,5·S<sub>k</sub> (табл. 7.6). Форми поєднано SRSS, напрямки X, Y${sz.vertical ? ', Z' : ''} — SRSS (п. 7.4.13, несиметрична споруда). Розрахункове значення (7.3): E<sub>d</sub> = γ<sub>n</sub>·G<sub>k</sub> + γ<sub>n</sub>·γ<sub>I</sub>·A<sub>ek</sub>/m + γ<sub>n</sub>·ψ<sub>E</sub>·Q<sub>k</sub>; γ<sub>I</sub> = ${f(site.gammaI, 2)} (${esc(site.gIsrc)}); m — табл. 7.7: сталь 1,3 (міцність), 1,2…1,0 (стійкість за λ), шви 1,0, болти 1,1. Для анкерів, закладних деталей і загальної стійкості γ<sub>pl</sub> = 1,0 (табл. 7.4, р. 1). Формула S<sub>ik</sub> — за ДБН В.1.2-6 (норма-посилання п. 7.4.1).</p>`);
+    if (!R.seis) { s.push(`<p><b>Сейсмічні навантаження не враховуються:</b> ${site.required ? 'модуль вимкнено' : 'розрахункова інтенсивність на всіх рівнях < 6 балів (п. 5.1)'}.</p>`); return s.join(''); }
+    const S = R.seis;
+    s.push(`<p>Множники (максимум за рівнями з перевіркою ULS): каркас γ<sub>n</sub>·γ<sub>I</sub>·γ<sub>pl</sub>·a₀ = <b>${f(S.kFrame / 1, 4)}g</b> (${S.govFrame ? S.govFrame.id : '—'}); анкери, закладні, перекидання γ<sub>n</sub>·γ<sub>I</sub>·a₀ = <b>${f(S.kFix, 4)}g</b>. Сейсмічна маса ${f(S.totalMass, 0)} кг; сума ефективних мас X ${f(S.sumMeff[0] * 100, 0)} %, Y ${f(S.sumMeff[1] * 100, 0)} %.</p>`);
+    s.push(F().tbl(['Форма', 'T, с', 'β (ґрунт ' + site.soil + ')', 'm<sub>eff,X</sub>', 'm<sub>eff,Y</sub>', 'm<sub>eff,Z</sub>'], S.modal.modes.slice(0, 10).map((m, i) => [i + 1, f(m.T, 3), f(N.seismicBeta(m.T, site.soil), 2), f(m.meff[0] * 100, 0) + ' %', f(m.meff[1] * 100, 0) + ' %', f(m.meff[2] * 100, 0) + ' %'])));
+    s.push(F().tbl(['Напрямок', 'Поперечна сила біля основи (каркас, γ<sub>pl</sub>), кН', 'Те саме при γ<sub>pl</sub> = 1 (анкери, фундамент), кН'], S.res.map(r => { const V = Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)); return [r.dir, kN(V * S.kFrame), kN(V * S.kFix)]; })));
+    s.push(checks(S.levels.filter(L => L.a0 > 0).map(L => row(`Перекіс ярусу ядра, ${L.id} (ЕР ${L.ER})`, `${f(L.driftMax, 5)} (a₀ = ${L.a0}g, γI = ${f(S.gammaI, 2)}, пружний розрахунок)`, `${L.lim} (табл. 7.5, сталевий каркас)`, L.uDrift, 'ДБН В.1.1-12:2025, п. 7.5.3', 'sls'))));
+    return s.join('');
+  };
+
   /** Блок «Перевірка за Посібником до СНиП 2.09.03» (формули 1–19) — для звіту 2 і сторінки анкерів. */
   RS.posobieBlock = function (R) {
     const pb = R.posobie, PB = SC.posobie;
@@ -286,13 +306,17 @@
     H(2, '3.3. Перевірки: розрахункові й допустимі значення');
     const ss = Fd.govSls, uu = Fd.govUls;
     const ck = [
-      row('Середній тиск під підошвою p<sub>m</sub>', `${f(ss.chk.p.pmean / 1000, 1)} кПа (${esc(ss.cb.name)})`, `R = ${f(Fd.Rsoil, 0)} кПа`, ss.chk.pMean, 'ДБН В.2.1-10', 'soil'),
-      row('Крайовий тиск p<sub>max</sub>', `${f(ss.chk.p.pmax / 1000, 1)} кПа`, `1,2R = ${f(1.2 * Fd.Rsoil, 0)} кПа`, ss.chk.pMax, 'ДБН В.2.1-10', 'soil'),
+      row('Середній тиск під підошвою p<sub>m</sub> (межа лінійної моделі)', `${f(ss.chk.p.pmean / 1000, 1)} кПа (${esc(ss.cb.name)})`, ss.chk.Rlim > Fd.Rsoil * 1.01 ? `1,2R = ${f(ss.chk.Rlim, 0)} кПа (s ≤ 0,4s<sub>u</sub>, п. 8.6.9)` : `R = ${f(Fd.Rsoil, 0)} кПа (п. 8.6.7)`, ss.chk.pMean, 'ДБН В.2.1-10, п. 8.6.7, 8.6.9; R — ДСТУ-Н Б В.2.1-28', 'soil'),
+      row('Крайовий тиск p<sub>max</sub>', `${f(ss.chk.p.pmax / 1000, 1)} кПа`, `1,2R = ${f(1.2 * Fd.Rsoil, 0)} кПа`, ss.chk.pMax, 'ДСТУ-Н Б В.2.1-28 / СНиП 2.02.01-83*', 'soil'),
       row('Частка підошви в контакті', `${f(ss.chk.p.contactFrac * 100, 0)} %`, `≥ ${f((fd.minContact || 0.75) * 100, 0)} %`, ss.chk.contact, 'ДБН В.2.1-10 (відрив підошви)', 'overturn'),
-      row('Перекидання (M<sub>перек</sub>/M<sub>утр</sub>)', f(uu.chk.overturn, 3), `≤ 1/${f(fd.overturnSF || 1.5, 2)} = ${f(1 / (fd.overturnSF || 1.5), 3)}`, uu.chk.overturn * (fd.overturnSF || 1.5), 'ДБН В.2.1-10; ДБН В.1.2-14', 'overturn'),
-      row('Зсув по підошві H/(μN)', f(uu.chk.slide, 3), `≤ 1/1,2 = 0,833 (μ = ${f(fd.frictionMu, 2)})`, uu.chk.slide * 1.2, 'ДБН В.2.1-10', 'slide'),
-      row('Осідання s', `${f(Fd.settle.s * 1000, 1)} мм`, `s<sub>u</sub> = ${f(fd.sLim * 1000, 0)} мм`, Fd.settle.uS, 'ДБН В.2.1-10, дод. И', 'settle'),
-      row('Крен i', Fd.settle.tilt.toExponential(2), `i<sub>u</sub> = ${fd.tiltLim}`, Fd.settle.uT, 'ДБН В.2.1-10', 'settle'),
+      row('Перекидання (M<sub>перек</sub>/M<sub>утр</sub>)', f(uu.chk.overturn, 3), `≤ 1/${f(fd.overturnSF || 1.5, 2)} = ${f(1 / (fd.overturnSF || 1.5), 3)}`, uu.chk.overturn * (fd.overturnSF || 1.5), 'ДБН В.2.1-10, п. 8.9.1 (коефіцієнт запасу 1,5 — прийнято проєктувальником)', 'overturn'),
+      ...(() => { const bx = Fd.fUls.filter(x => x.chk.bear && x.chk.bear.ok).reduce((m, x) => (!m || x.chk.bear.u > m.chk.bear.u ? x : m), null), sx = Fd.fUls.filter(x => x.chk.bear && x.chk.bear.ok).reduce((m, x) => (!m || x.chk.bear.uSlide > m.chk.bear.uSlide ? x : m), null);
+        if (!bx) return [row('Несуча здатність основи', 'рівнодійна поза підошвою', 'F ≤ γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub>', 9.99, 'ДБН В.2.1-10, п. 8.9.2', 'overturn')];
+        const b0 = bx.chk.bear, b1 = sx.chk.bear;
+        return [row(`Несуча здатність основи, ф. (8.4): F ≤ γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub> (${esc(bx.cb.id)})`, `F = ${kN(b0.V)} кН; B'×L' = ${f(b0.Bp, 2)}×${f(b0.Lp, 2)} м`, `γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub> = ${f(b0.gC, 2)}·${kN(b0.Fu)}/${f(b0.gn, 2)} = ${kN(b0.gC * b0.Fu / b0.gn)} кН (φ<sub>I</sub> = ${f(b0.phI, 1)}°, c<sub>I</sub> = ${f(b0.cI / 1000, 1)} кПа; N<sub>q</sub> = ${f(b0.Nq, 1)}, N<sub>c</sub> = ${f(b0.Nc, 1)}, N<sub>γ</sub> = ${f(b0.Ng, 1)}; i<sub>q</sub> = ${f(b0.iq, 3)})`, b0.u, 'ДБН В.2.1-10, п. 8.9.2; F<sub>u</sub> — EN 1997-1, дод. D', 'overturn'),
+          row(`Зсув по підошві, ф. (8.7): F<sub>s,a</sub> ≤ γ<sub>c</sub>F<sub>s,r</sub>/γ<sub>n</sub> (${esc(sx.cb.id)})`, `F<sub>s,a</sub> = ${kN(b1.H)} кН`, `γ<sub>c</sub>·V·tgφ<sub>I</sub>/γ<sub>n</sub> = ${kN(b1.gC * b1.Fsr / b1.gn)} кН`, b1.uSlide, 'ДБН В.2.1-10, п. 8.9.5', 'slide')]; })(),
+      row('Осідання s (пошарове підсумовування)', `${f(Fd.settle.s * 1000, 1)} мм`, `s<sub>u</sub> = ${f(fd.sLim * 1000, 0)} мм`, Fd.settle.uS, 'ДБН В.2.1-10, ф. (8.2), дод. А, табл. А.1 (р. 6 — жорсткі споруди до 100 м)', 'settle'),
+      row('Крен i', Fd.settle.tilt.toExponential(2), `i<sub>u</sub> = ${fd.tiltLim}`, Fd.settle.uT, 'ДБН В.2.1-10, п. 8.7, табл. А.1 (р. 6)', 'settle'),
       row('Продавлювання плити', `v<sub>Ed</sub> = ${f(sl.vEd / 1e6, 3)} МПа`, `v<sub>Rd,c</sub> = ${f(sl.vRdc / 1e6, 3)} МПа`, sl.punching, 'EN 1992-1-1, 6.4', 'punch'),
       row('Поперечна сила в плиті', '—', 'V<sub>Rd,c</sub>', Math.max(sl.shearX, sl.shearY), 'EN 1992-1-1, 6.2.2', 'punch'),
       row('Згин: нижня арматура уздовж X', `M = ${kN(sl.bx.M)} кН·м/м; A<sub>s,req</sub> = ${f(sl.bx.Areq * 1e6, 0)} мм²/м`, `прийнято Ø${sl.bx.pick.dia}/${sl.bx.pick.s} = ${f(sl.bx.pick.As * 1e6, 0)} мм²/м`, sl.bx.Areq / sl.bx.pick.As, 'EN 1992-1-1, 6.1; 9.3', 'rc'),
@@ -341,7 +365,7 @@
     ];
     if (R.cases.I) sum.push(['Ожеледь I', `${kN(R.cases.I.info.total)} кН`, `γ<sub>fm</sub> = ${f(N.interp(N.iceGammaFm.T, N.iceGammaFm.g, pr.site.Tlife), 3)} (табл. 10.4)`, `${kN(R.cases.I.info.total * N.interp(N.iceGammaFm.T, N.iceGammaFm.g, pr.site.Tlife))} кН`, N.iceK.src, effect('I')]);
     if (R.cases.Tp) sum.push(['Температура ΔT', `+${pr.site.temp.dTplus} / ${pr.site.temp.dTminus} °C`, `γ<sub>f</sub> = ${f(pr.site.temp.gf, 2)}`, `ε = α·ΔT = ${f(N.alphaT * pr.site.temp.dTplus * pr.site.temp.gf * 1e6, 0)}·10⁻⁶`, N.tempMeta.src, effect('T')]);
-    if (R.seis) { const V = Math.max(...R.seis.res.map(r => Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))); sum.push(['Сейсміка A (особливе сполучення)', `${pr.site.seismic.intensity} балів, a₀ = ${f(c.seis.a0, 3)}g`, 'γ = 1,0 (особливе)', `V<sub>основи</sub> = ${kN(V)} кН`, N.docs.seismic, effect('A')]); }
+    if (R.seis) { const V = R.seis.kFix * Math.max(...R.seis.res.filter(r => r.dir !== 'Z').map(r => Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))); sum.push(['Сейсміка E (сейсмічна ситуація, ф. 7.3)', `${R.seis.levels.filter(L => L.a0 > 0).map(L => `${L.id}: ${L.I} бал., a₀ = ${L.a0}g`).join('; ')}`, `γI = ${f(R.seis.gammaI, 2)}; γpl, m — табл. 7.4, 7.7`, `V<sub>основи</sub> = ${kN(V)} кН`, N.docs.seismic, effect('A')]); }
     if (R.cases.Q) sum.push(['Обслуговування / монтаж Q', (pr.loadsUser || []).map(l => esc(l.name)).join('; '), 'γ<sub>f</sub> = 1,2', '—', 'ДБН В.1.2-2, р. 6', effect('Q')]);
     s.push(F().tbl(['Вплив', 'Характеристичне (нормативне)', 'Коефіцієнт надійності', 'Розрахункове', 'Джерело', 'Вплив на конструкцію'], sum));
     P(`Для порівняння: сумарна розрахункова сила вітру становить ${f(Wg.F * c.gfmW / Math.max(G, 1) * 100, 0)} % від ваги конструкції; утримувальний момент від ваги та фундаменту перевіряється у звіті 3.`);
@@ -369,13 +393,8 @@
       H(2, '4.6. Температурні впливи');
       P(`ΔT<sub>+</sub> = +${pr.site.temp.dTplus} °C, ΔT<sub>−</sub> = ${pr.site.temp.dTminus} °C, α = ${N.alphaT}·1/°C, γ<sub>f</sub> = ${pr.site.temp.gf}. Прикладено як початкові деформації стрижнів ε = α·ΔT; зусилля виникають через защемлення бази й статичну невизначеність ядра.`);
     }
-    if (R.seis) {
-      H(2, '4.7. Сейсмічні впливи');
-      const z = c.seis;
-      P(`Бальність ${z.intensity} → a₀ = ${f(z.a0, 3)}g, ґрунт категорії ${z.soil}; k₁ = ${f(z.k1, 2)}, k₂ = ${f(z.k2, 2)}, k<sub>гр</sub> = ${f(z.kgr, 2)}, k<sub>ψ</sub> = ${f(z.kpsi, 2)}. Маса для сейсміки ${f(R.seis.totalMass, 0)} кг. Сума ефективних мас: X ${f(R.seis.sumMeff[0] * 100, 0)} %, Y ${f(R.seis.sumMeff[1] * 100, 0)} % (потрібно ≥ 90 %).`);
-      s.push(F().tbl(['Форма', 'T, с', 'β', 'm<sub>eff,X</sub>', 'm<sub>eff,Y</sub>'], R.seis.modal.modes.slice(0, 8).map((m, i) => [i + 1, f(m.T, 3), f(N.seismicBeta(m.T, z.soil), 2), f(m.meff[0] * 100, 0) + ' %', f(m.meff[1] * 100, 0) + ' %'])));
-      s.push(F().tbl(['Напрямок', 'Сейсмічна поперечна сила біля основи, кН'], R.seis.res.map(r => [r.dir, kN(Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))])));
-    }
+    H(2, '4.7. Сейсмічні впливи (ДБН В.1.1-12:2025)');
+    s.push(RS.seismicBlock(R));
     if ((pr.loadsUser || []).length) {
       H(2, '4.8. Монтажні та експлуатаційні навантаження');
       s.push(F().tbl(['Навантаження', 'Тип', 'Точка x; y; z, м', 'F<sub>x</sub>; F<sub>y</sub>; F<sub>z</sub>, кН'], pr.loadsUser.map(l => [esc(l.name), esc(l.kind), `${f(l.x)}; ${f(l.y)}; ${f(l.z)}`, `${f(l.Fx)}; ${f(l.Fy)}; ${f(l.Fz)}`])));

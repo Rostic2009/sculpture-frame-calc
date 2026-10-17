@@ -112,14 +112,12 @@
     return res;
   };
 
-  /** Гранична гнучкість (ДБН В.2.6-198, табл. 30, 31 — спрощено). */
-  C.lambdaLimit = function (kind, util) {
-    const a = Math.max(0.5, Math.min(1, util || 1));
-    if (kind === 'tension') return 400;
-    if (kind === 'brace') return 200;
-    if (kind === 'main') return 180 - 60 * a;
-    return 210 - 60 * a;
+  /** Гранична гнучкість λu = lef/i (ДБН В.2.6-198 зі Зміною № 1 (2022), п. 13.4.1: 200 — стиснуті, 400 — розтягнуті;
+   *  табл. 13.9, 13.10 вилучено). У разі перевищення — п. 13.4.2: перевірка на транспортування і монтаж. */
+  C.lambdaLimit = function (kind) {
+    return kind === 'tension' ? 400 : 200;
   };
+  C.lambdaMeta = { src: 'ДБН В.2.6-198:2014 зі Зміною № 1, п. 13.4.1–13.4.2', note: 'Перевищення λu допускається лише з додатковою перевіркою міцності і стійкості на місцеві навантаження під час транспортування і монтажу (п. 13.4.2).' };
 
   SC.checks = C;
 })(typeof window !== 'undefined' ? (window.SC = window.SC || {}) : (global.SC = global.SC || {}));

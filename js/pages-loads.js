@@ -162,22 +162,29 @@
   P.seismic = {
     input: true,
     render(c) {
-      const { fld, card, N, f, fmt } = c;
-      const Ts = [0.05, 0.1, 0.2, 0.3, 0.4, 0.6, 0.8, 1.0, 1.5, 2.0];
-      return `<h2>Сейсмічне навантаження</h2>
-      <p class="lead">Спектральний метод: S<sub>ik</sub> = k₁·k₂·k<sub>гр</sub>·m<sub>k</sub>·g·a₀·β(T<sub>i</sub>)·k<sub>ψ</sub>·η<sub>ik</sub>; форми та періоди — модальний аналіз МСЕ; SRSS. Особливе сполучення 0,9·G + 0,5·S ± E.</p>
-      <div class="cols">${card('Параметри майданчика', `<div class="form">
+      const { fld, card, N, f, fmt, state } = c;
+      const sz = state.pr.site.seismic, Ts = [0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 3.0];
+      const site = N.seismicSite(sz, state.pr.site.cc, 6, 1);
+      return `<h2>Сейсмічні впливи</h2>
+      <p class="lead">ДБН В.1.1-12:2025 «Будівництво у сейсмічних районах» (чинний з 01.07.2026). Бальність — за переліком населених пунктів (Додаток А, карти ЗСР-2004 А, В, С), поправка на ґрунт — табл. 6.1, a₀ — п. 6.1.5 і табл. 6.2, спектр — табл. 6.3, коефіцієнти — табл. 7.3, 7.4, 7.6, 7.7; перекоси — табл. 7.5.</p>
+      <div class="cols">${card('Майданчик', `<div class="form">
         ${fld('site.seismic.on', 'Враховувати сейсміку', '', { type: 'check' })}
-        ${fld('site.seismic.intensity', 'Сейсмічність', 'бал', { options: [5, 6, 7, 8, 9].map(b => [b, `${b} — a₀ = ${N.seismicA0[b]}g`]), num: true })}
-        ${fld('site.seismic.soil', 'Категорія ґрунту', '', { options: [['I', 'I (скельні)'], ['II', 'II'], ['III', 'III (слабкі)']] })}
-        ${fld('site.seismic.k1', 'k₁ — допустимі пошкодження', '', { step: 0.05, hint: '1,0 — пошкодження не допускаються' })}
-        ${fld('site.seismic.k2', 'k₂ — конструктивне рішення', '', { step: 0.05 })}
-        ${fld('site.seismic.kgr', 'k_гр — ґрунтові умови', '', { step: 0.05 })}
-        ${fld('site.seismic.kpsi', 'k_ψ — дисипація', '', { step: 0.05, hint: '1,5 — гнучкі споруди баштового типу' })}
-        ${fld('site.seismic.nModes', 'Кількість форм', '', { step: 1, min: 1, max: 30 })}
-        ${fld('site.seismic.vertical', 'Вертикальна складова 0,7 (консолі)', '', { type: 'check' })}
-      </div><p class="note">${c.normPill('verify')} ${N.docs.seismicNew}.</p>`)}
-      ${card('β(T)', fmt.tbl(['T, с', 'ґрунт I', 'ґрунт II', 'ґрунт III'], Ts.map(T => [f(T, 2), f(N.seismicBeta(T, 'I'), 2), f(N.seismicBeta(T, 'II'), 2), f(N.seismicBeta(T, 'III'), 2)])) + `<p class="note">${N.seismicBetaMeta.src}. ${N.seismicBetaMeta.note}</p>`)}</div>`;
+        ${fld('site.seismic.place', 'Населений пункт (Додаток А)', '', { options: [['', '— не в переліку (бальність з карт) —']].concat(N.seisPlaces.map(p => [p.name, `${p.name} (${p.obl.replace(' область', ' обл.')}) — ${p.A || '–'}/${p.B || '–'}/${p.C || '–'}${p.note ? ' ' + p.note + ')' : ''}`])), rerender: true })}
+        ${fld('site.seismic.A', 'Карта ЗСР-2004-А (10 %)', 'бал', { options: [['', '< 6'], [6, '6'], [7, '7'], [8, '8'], [9, '9']], num: true, rerender: true })}
+        ${fld('site.seismic.B', 'Карта ЗСР-2004-В (5 %)', 'бал', { options: [['', '< 6'], [6, '6'], [7, '7'], [8, '8'], [9, '9']], num: true, rerender: true })}
+        ${fld('site.seismic.C', 'Карта ЗСР-2004-С (1 %)', 'бал', { options: [['', '< 6'], [6, '6'], [7, '7'], [8, '8'], [9, '9'], [10, '10']], num: true, rerender: true })}
+        ${fld('site.seismic.soil', 'Категорія ґрунту (табл. 6.1)', '', { options: [['I', 'I — скельні, Vs > 800 м/с (−1 бал)'], ['II', 'II — середні, 500…800 м/с'], ['III', 'III — слабкі, 200…500 м/с (+1 бал)'], ['IV', 'IV — пухкі водонасичені, насипні (спец. дослідження)']], rerender: true })}
+      </div>`)}
+      ${card('Споруда', `<div class="form">
+        ${fld('site.seismic.damage', 'γ_pl — допустимі пошкодження (табл. 7.4)', '', { options: Object.entries(N.seismicGammaPl).map(([k, v]) => [k, v.name]), rerender: true })}
+        ${fld('site.seismic.cultural', 'Культурна цінність (γI = 1,4, табл. 7.3, р. 2)', '', { type: 'check', rerender: true })}
+        ${fld('site.seismic.gammaI', 'γI (табл. 7.3): auto або число', '', { type: 'text', hint: 'auto: 1,4 при H/B ≥ 5 (висотна споруда невеликих у плані розмірів), інакше 1,0' })}
+        ${fld('site.seismic.a1core', 'Ядро й база — категорія А1: ULS і при МРЗ (ЕР ІІІ)', '', { type: 'check', rerender: true })}
+        ${fld('site.seismic.vertical', 'Вертикальна складова (п. 7.4.18 — консолі, перекидання)', '', { type: 'check' })}
+        ${fld('site.seismic.nModes', 'Кількість форм', '', { step: 1, min: 1, max: 40 })}
+      </div>`)}</div>
+      ${card('Рівні впливу для ' + state.pr.site.cc + ' → ЕГ ' + site.EG + ' (табл. 7.1)', fmt.tbl(['Рівень', 'Джерело', 'Інтенсивність, бал', 'a₀, g', 'ЕР', 'γ_pl', 'Перекіс, ≤'], site.levels.map(L => [L.id, c.esc(L.src), L.I < 6 ? L.I + ' (< 6 — не враховується)' : L.I, f(L.a0, 2), L.ER, f(N.gammaPlOf(site.damage, L.I), 2), N.seismicDrift[L.ER]])) + (site.notes.length ? `<ul class="warns">${site.notes.map(t => `<li class="error">${c.esc(t)}</li>`).join('')}</ul>` : ''))}
+      ${card('β(T) — табл. 6.3', fmt.tbl(['T, с', 'ґрунт I', 'ґрунт II', 'ґрунт III'], Ts.map(T => [f(T, 2), f(N.seismicBeta(T, 'I'), 2), f(N.seismicBeta(T, 'II'), 2), f(N.seismicBeta(T, 'III'), 2)])) + `<p class="note">${N.seismicBetaMeta.src}. ${N.seismicBetaMeta.note}</p>`)}`;
     },
   };
 
@@ -223,7 +230,7 @@
       ${card('Перелік', `<div class="row"><label>Фільтр <select id="comboF"><option value="">усі (${R.combos.length})</option>${['C', 'I', 'T', 'Q', 'W', 'SW', 'U', 'IW', 'M', 'A'].map(p => `<option value="${p}" ${flt === p ? 'selected' : ''}>${p}…</option>`).join('')}</select></label></div>` +
         fmt.tbl(['Код', 'Ситуація', 'Склад сполучення', 'Ведучий', 'Супутні', 'φ недоскон., ‰', 'max U каркаса'], list.map(cb => [cb.id, cb.situation, esc(cb.name), cb.lead || '—', (cb.acc || []).join(', ') || '—', f((cb.phi || 0) * 1000, 2), fmt.U(ulsU(cb.id))])))}
       ${card('Сполучення II групи (характеристичні, для переміщень, тиску на ґрунт, тріщин)', fmt.tbl(['Код', 'Склад'], R.sls.slice(0, 8).map(s => [s.id, esc(s.name)]).concat([['…', `ще ${Math.max(0, R.sls.length - 8)}`]])))}
-      ${R.seis ? card('Особливе сполучення (сейсміка)', `<p>${c.N.seismicComb.G}·G + ${c.N.seismicComb.snow}·S ± E<sub>X</sub>, ± E<sub>Y</sub>; знаки N, M<sub>y</sub>, M<sub>z</sub> перебираються для кожного перерізу.</p>`) : ''}`;
+      ${R.seis ? card('Сейсмічна розрахункова ситуація', `<p>ДБН В.1.1-12:2025, ф. (7.3): E<sub>d</sub> = γ<sub>n</sub>·(1,0·G<sub>k</sub> + 0,5·S<sub>k</sub>) ± γ<sub>n</sub>·γ<sub>I</sub>·A<sub>ek</sub>/m; A<sub>ek</sub> — SRSS форм і напрямків X, Y, Z; знаки N, M<sub>y</sub>, M<sub>z</sub> перебираються для кожного перерізу. Вітер, температура, ожеледь у сейсмічну ситуацію не входять (табл. 7.6).</p>`) : ''}`;
     },
     onChange(e, c) { if (e.target.id !== 'comboF') return false; c.state.ui.comboF = e.target.value; c.render(); return true; },
   };

@@ -404,7 +404,8 @@
   // ---------------- ФУНДАМЕНТ ----------------
   const F = {};
 
-  /** Розрахунковий опір ґрунту R, кПа (ДБН В.2.1-10). */
+  /** Розрахунковий опір ґрунту R, кПа — умовна межа лінійної залежності «тиск — осідання» (ДБН В.2.1-10, п. 8.6.7).
+   *  Формула R = γc1γc2/k·(Mγ·kz·b·γII + Mq·d₁·γ'II + Mc·cII) — за ДСТУ-Н Б В.2.1-28 / СНиП 2.02.01-83* (у ДБН В.2.1-10:2018 не наводиться). */
   F.soilR = function (fd) {
     const N = SC.norms.soilM;
     const it = SC.norms.interp;
@@ -441,7 +442,10 @@
     }
     const w = F.weights(fd);
     Fz -= (w.Gc + w.Gs) * kG;
-    return { Fx, Fy, Fz, Mx, My, Mz, W: w };
+    // ДБН В.2.1-10, п. 9.1.4: навантаження на покриття поблизу фундаменту (громадські — 10 кПа) — лише як несприятливе (kG ≥ 1)
+    const q = (fd.surcharge || 0) * 1000, Aq = Math.max(0, fd.B * fd.L - fd.pedB * fd.pedL);
+    if (kG >= 1 && q > 0) Fz -= q * Aq;
+    return { Fx, Fy, Fz, Mx, My, Mz, W: w, Q: kG >= 1 ? q * Aq : 0 };
   };
 
   /** Тиск під жорсткою плитою з можливим відривом. Fz — вниз від'ємна. */
@@ -461,6 +465,35 @@
     return { ok: true, pmax: sol.pmax, pmean, contactFrac: sol.contactFrac, qmaxLin, qminLin, sol, cells };
   };
 
+  /**
+   * Несуча здатність основи (ДБН В.2.1-10, п. 8.9.2): F ≤ γc·Fu/γn. Сила граничного опору Fu — за EN 1997-1, дод. D
+   * (дреноване: R/A' = c'Nc·sc·ic + q'Nq·sq·iq + 0,5γ'B'Nγ·sγ·iγ) на ефективній площі A' = B'·L', B' = B − 2e_B.
+   * Розрахункові φI, cI = характеристичні / γg (ф. 8.1). γc — п. 8.9.2 за видом ґрунту.
+   * Зсув по підошві (ф. 8.7): Fs,a ≤ γc·Fs,r/γn, Fs,r = V·tgφI (зчеплення й пасивний тиск не враховуються — у запас).
+   */
+  F.gammaCsoil = { sand: 1.0, silty: 0.9, clay: 0.9, clayUnst: 0.85, rock: 1.0, rockWeathered: 0.9, rockStrong: 0.8 };
+  F.bearing = function (fd, res) {
+    const L0 = (fd.layers && fd.layers.length) ? SC.concrete.layerAt(fd.layers, fd.depth + 0.01) : { gamma: fd.gammaSoil, phi: fd.phi, c: fd.cII };
+    const gphi = fd.gammaGphi || 1.1, gc = fd.gammaGc || 1.5;
+    const phI = Math.atan(Math.tan((L0.phi != null ? L0.phi : fd.phi) * Math.PI / 180) / gphi), cI = (L0.c != null ? L0.c : fd.cII) * 1000 / gc;
+    const gam = (L0.gamma || fd.gammaSoil) * 1000, q = gam * fd.depth;
+    const V = Math.max(1e-9, -res.Fz), H = Math.hypot(res.Fx, res.Fy);
+    const eB = Math.abs(res.My) / V, eL = Math.abs(res.Mx) / V;
+    let Bp = fd.B - 2 * eB, Lp = fd.L - 2 * eL;
+    if (Bp <= 0 || Lp <= 0) return { ok: false, u: 99, reason: 'рівнодійна поза ядром ефективної площі' };
+    if (Bp > Lp) [Bp, Lp] = [Lp, Bp];
+    const A = Bp * Lp, t = Math.tan(phI);
+    const Nq = Math.exp(Math.PI * t) * Math.tan(Math.PI / 4 + phI / 2) ** 2, Nc = (Nq - 1) / Math.max(t, 1e-9), Ng = 2 * (Nq - 1) * t;
+    const sq = 1 + Bp / Lp * Math.sin(phI), sg = 1 - 0.3 * Bp / Lp, sc = (sq * Nq - 1) / (Nq - 1);
+    const m = (2 + Bp / Lp) / (1 + Bp / Lp);
+    const base = Math.max(1e-9, 1 - H / (V + A * cI / Math.max(t, 1e-9)));
+    const iq = base ** m, ig = base ** (m + 1), ic = iq - (1 - iq) / (Nc * Math.max(t, 1e-9));
+    const qu = cI * Nc * sc * ic + q * Nq * sq * iq + 0.5 * gam * Bp * Ng * sg * ig;
+    const Fu = qu * A, gC = F.gammaCsoil[fd.soilType || 'clay'] || 0.9, gn = fd.gammaN || 1;
+    const Fsr = V * t;
+    return { ok: true, Fu, qu, A, Bp, Lp, phI: phI * 180 / Math.PI, cI, Nq, Nc, Ng, iq, ig, ic, gC, gn, u: V * gn / (gC * Fu), Fsr, uSlide: H * gn / (gC * Math.max(Fsr, 1e-9)), H, V };
+  };
+
   /** Перевірки фундаменту для одного сполучення. type: 'sls' | 'uls' */
   F.check = function (fd, res, R, type) {
     const out = { type };
@@ -475,14 +508,17 @@
     const halfW = Math.abs(ux) * fd.B / 2 + Math.abs(uy) * fd.L / 2;
     out.overturn = Mo > 0 ? Mo / Math.max(1e-9, Nd * halfW) : 0; // = 1/коеф. запасу
     out.slide = H / Math.max(1e-9, fd.frictionMu * Nd);
+    if (type === 'uls') { out.bear = F.bearing(fd, res); }
     if (type === 'sls') {
-      out.pMean = p.pmean / (R * 1000);
+      // п. 8.6.7, 8.6.9: лінійна модель при σ ≤ R; до 1,2R — якщо s ≤ 0,4s_u (fd.sRatio задається після розрахунку осідань)
+      out.Rlim = (fd.sRatio != null && fd.sRatio <= 0.4) ? 1.2 * R : R;
+      out.pMean = p.pmean / (out.Rlim * 1000);
       out.pMax = p.pmax / (1.2 * R * 1000);
       const mc = fd.minContact || 0.75;
       out.contact = p.contactFrac >= 0.999 ? 0 : (1 - p.contactFrac) / (1 - mc);
       out.max = Math.max(out.pMean, out.pMax, out.contact);
     } else {
-      out.max = Math.max(out.overturn * (fd.overturnSF || 1.5), out.slide * 1.2);
+      out.max = Math.max(out.overturn * (fd.overturnSF || 1.5), out.bear && out.bear.ok ? Math.max(out.bear.u, out.bear.uSlide) : 99);
     }
     return out;
   };

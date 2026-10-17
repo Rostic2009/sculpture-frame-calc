@@ -119,20 +119,13 @@
        S<sub>m</sub>(μ = 1) = ${f(c.Sm1, 0)} Па. F<sub>s,j</sub> = S<sub>m</sub>·μ<sub>j</sub>·A<sub>h,j</sub>, напрямок — вертикально вниз. Сумарне характеристичне снігове навантаження ${kN(R.cases.S.info.total)} кН.
        Зони накопичення на складках плаща, книзі, плечах приймаються за підтвердженням інженера (коефіцієнти покрівель не переносяться механічно).`);
     // сейсміка
-    H(3, '4.4. Сейсмічні впливи');
-    if (R.seis) {
-      const z = c.seis;
-      P(`Спектральний метод: S<sub>ik</sub> = k₁·k₂·k<sub>гр</sub>·m<sub>k</sub>·g·a₀·β<sub>i</sub>·k<sub>ψ</sub>·η<sub>ik</sub>, η<sub>ik</sub>·m<sub>k</sub> = m<sub>k</sub>·φ<sub>ik</sub>·Γ<sub>i</sub>, Γ<sub>i</sub> = φ<sub>i</sub><sup>T</sup>M·r / φ<sub>i</sub><sup>T</sup>M·φ<sub>i</sub>.
-        Бальність ${z.intensity} → a₀ = ${f(z.a0, 3)}g; ґрунт категорії ${z.soil}; k₁ = ${f(z.k1, 2)}, k₂ = ${f(z.k2, 2)}, k<sub>гр</sub> = ${f(z.kgr, 2)}, k<sub>ψ</sub> = ${f(z.kpsi, 2)}.
-        Маси: (${N.seismicComb.G}·G + ${N.seismicComb.snow}·S)·γ/g = ${f(R.seis.totalMass, 0)} кг. Зусилля від форм поєднано за правилом SRSS${pr.site.seismic.vertical ? '; вертикальна складова 0,7 від горизонтальної' : ''}.`);
-      s.push(tbl(['Форма', 'T, с', 'β', 'S<sub>a</sub>, м/с²', 'm<sub>eff,X</sub>', 'm<sub>eff,Y</sub>', 'm<sub>eff,Z</sub>'], R.seis.modal.modes.map((m, i) => [i + 1, f(m.T, 3), f(SC.norms.seismicBeta(m.T, z.soil), 2), f(z.k1 * z.k2 * z.kgr * z.a0 * 9.81 * SC.norms.seismicBeta(m.T, z.soil) * z.kpsi, 3), pc(m.meff[0]), pc(m.meff[1]), pc(m.meff[2])])));
-      P(`Сума ефективних мас: X ${pc(R.seis.sumMeff[0])}, Y ${pc(R.seis.sumMeff[1])}. Сейсмічна поперечна сила на рівні опор: ${R.seis.res.map(r => `${r.dir}: ${kN(Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))} кН`).join('; ')}.`);
-    } else P('Сейсмічні впливи не враховано (бальність майданчика < 6 або модуль вимкнено).');
+    H(3, '4.4. Сейсмічні впливи (ДБН В.1.1-12:2025)');
+    s.push(SC.reports.seismicBlock(R));
 
     // 5
     H(2, '5. Розрахункові сполучення');
     P(`Основні сполучення (ДБН В.1.2-2, р. 4): постійне + змінні за формулою (4.4) ДБН В.1.2-2 (Зміна № 2): основне короткочасне — ψ = 1,0, друге — 0,9, решта — 0,7; перебираються всі варіанти основного й другого впливу (${st(N.psi.status)}). Напрямки вітру θ = 0…360° з кроком ${pr.design.dirStep}°. Усі ефекти множаться на γn = ${f(pr.site.gammaN, 2)}.
-       Особливе сполучення (сейсміка): ${N.seismicComb.G}·G + ${N.seismicComb.snow}·S ± E, вітер не враховується. Для перекидання/відриву — ${N.gammaG.favourable}·G + W.`);
+       Сейсмічна розрахункова ситуація (ДБН В.1.1-12:2025, ф. 7.3): 1,0·G + 0,5·S ± γ<sub>I</sub>·E/m (вітер, температура не входять, табл. 7.6). Для перекидання/відриву — ${N.gammaG.favourable}·G + W.`);
     const cl = R.combos.filter(cb => cb.theta == null || cb.theta === 0).map(cb => [cb.id, cb.situation, esc(cb.name), cb.lead || '—', (cb.acc || []).join(', ') || '—']);
     s.push(tbl(['Код', 'Ситуація', 'Склад', 'Ведучий', 'Супутні'], cl.concat([['…', '', `усього ${R.combos.length} сполучень (θ = 0…360°)`, '', '']])));
     if (R.solved[0]) P(`Глобальна недосконалість φ = φ₀·α<sub>h</sub>·α<sub>m</sub> = ${f(R.solved[0].cb.phi * 1000, 3)}·10⁻³ рад (EN 1993-1-1, 5.3.2) — прикладена як горизонтальні сили H = φ·V у напрямку вітру.`);
@@ -193,7 +186,7 @@
     H(2, '8. Фундамент');
     const F = R.found, fd = F.fd;
     P(`Монолітна плита ${f(fd.B)}×${f(fd.L)}×${f(fd.h)} м з підколонником ${f(fd.pedB)}×${f(fd.pedL)}×${f(fd.pedH)} м, глибина закладання d = ${f(fd.depth)} м. Вага бетону G<sub>c</sub> = ρ<sub>c</sub>·g·V = ${kN(F.govSls.res.W.Gc)} кН, ґрунту на уступах ${kN(F.govSls.res.W.Gs)} кН.`);
-    if (F.soil) P(`Розрахунковий опір ґрунту (ДБН В.2.1-10): R = γ<sub>c1</sub>γ<sub>c2</sub>/k·(M<sub>γ</sub>·k<sub>z</sub>·b·γ<sub>II</sub> + M<sub>q</sub>·d₁·γ'<sub>II</sub> + M<sub>c</sub>·c<sub>II</sub>) = ${f(fd.gammaC1, 2)}·${f(fd.gammaC2, 2)}/${f(fd.kfactor, 2)}·(${f(F.soil.mg, 2)}·1·${f(F.soil.b, 2)}·${f(fd.gammaSoil, 1)} + ${f(F.soil.mq, 2)}·${f(fd.depth, 2)}·${f(fd.gammaSoil, 1)} + ${f(F.soil.mc, 2)}·${f(fd.cII, 1)}) = ${f(F.Rsoil, 1)} кПа (φ<sub>II</sub> = ${fd.phi}°).`);
+    if (F.soil) P(`Розрахунковий опір ґрунту (умовна межа лінійності, ДБН В.2.1-10, п. 8.6.7; формула — ДСТУ-Н Б В.2.1-28): R = γ<sub>c1</sub>γ<sub>c2</sub>/k·(M<sub>γ</sub>·k<sub>z</sub>·b·γ<sub>II</sub> + M<sub>q</sub>·d₁·γ'<sub>II</sub> + M<sub>c</sub>·c<sub>II</sub>) = ${f(fd.gammaC1, 2)}·${f(fd.gammaC2, 2)}/${f(fd.kfactor, 2)}·(${f(F.soil.mg, 2)}·1·${f(F.soil.b, 2)}·${f(fd.gammaSoil, 1)} + ${f(F.soil.mq, 2)}·${f(fd.depth, 2)}·${f(fd.gammaSoil, 1)} + ${f(F.soil.mc, 2)}·${f(fd.cII, 1)}) = ${f(F.Rsoil, 1)} кПа (φ<sub>II</sub> = ${fd.phi}°).`);
     else P(`Розрахунковий опір ґрунту R = ${f(F.Rsoil, 0)} кПа (за висновком інженерно-геологічних вишукувань).`);
     const sl = F.govSls, ul = F.govUls;
     s.push(tbl(['Перевірка', 'Сполучення', 'Значення', 'Критерій', 'U'], [
@@ -201,7 +194,7 @@
       ['Крайовий тиск p<sub>max</sub>', esc(sl.cb.name), f(sl.chk.p.pmax / 1000, 1) + ' кПа', `≤ 1,2R = ${f(1.2 * F.Rsoil, 0)} кПа`, U(sl.chk.pMax)],
       ['Частка контакту підошви', esc(sl.cb.name), pc(sl.chk.p.contactFrac), `≥ ${pc(fd.minContact || 0.75)}`, U(sl.chk.contact)],
       ['Перекидання M<sub>перек</sub>/M<sub>утр</sub>', esc(ul.cb.name), f(ul.chk.overturn, 3), `коеф. запасу ≥ ${f(fd.overturnSF || 1.5, 2)}`, U(ul.chk.overturn * (fd.overturnSF || 1.5))],
-      ['Зсув H/(μ·N)', esc(ul.cb.name), f(ul.chk.slide, 3), `μ = ${f(fd.frictionMu, 2)}, запас 1,2`, U(ul.chk.slide * 1.2)],
+      ...(ul.chk.bear && ul.chk.bear.ok ? [['Несуча здатність основи F ≤ γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub> (ДБН В.2.1-10, ф. 8.4; F<sub>u</sub> — EN 1997-1, дод. D)', esc(ul.cb.name), `F = ${kN(ul.chk.bear.V)} кН`, `γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub> = ${kN(ul.chk.bear.gC * ul.chk.bear.Fu / ul.chk.bear.gn)} кН`, U(ul.chk.bear.u)], ['Зсув по підошві (ф. 8.7)', esc(ul.cb.name), `${kN(ul.chk.bear.H)} кН`, `γ<sub>c</sub>V·tgφ<sub>I</sub>/γ<sub>n</sub> = ${kN(ul.chk.bear.gC * ul.chk.bear.Fsr / ul.chk.bear.gn)} кН`, U(ul.chk.bear.uSlide)]] : []),
       ['Продавлювання', 'ULS', `v<sub>Ed</sub> = ${MPa(F.reinf.vEd)} МПа`, `v<sub>Rd,c</sub> = ${MPa(F.reinf.vRdc)} МПа`, U(F.reinf.punching)],
     ]));
     P(`Тиск під жорсткою плитою визначено з урахуванням можливого відриву (ґрунт не сприймає розтяг). Для повного контакту це збігається з формулою q = N/(BL) ± M<sub>x</sub>y/I<sub>x</sub> ± M<sub>y</sub>x/I<sub>y</sub>: q<sub>max,лін</sub> = ${f(sl.chk.p.qmaxLin / 1000, 1)} кПа, q<sub>min,лін</sub> = ${f(sl.chk.p.qminLin / 1000, 1)} кПа.`);
@@ -298,7 +291,7 @@
     const Wth = R.cases.W.reduce((m, W) => { const F = W.info.parts.reduce((a, p) => a + p.F, 0); return F > m.F ? { F, th: W.theta } : m; }, { F: -1, th: 0 }).th;
     const G = (R.cases.G.info.frameMass + R.cases.G.info.shellMass) * 9.81;
     out.push(`Повна вага конструкції без фундаменту ${kN(G)} кН; найбільша сумарна розрахункова сила вітру ${kN(Wmax)} кН (θ = ${Wth}°) — ${f(Wmax / G * 100, 0)} % від ваги.`);
-    if (R.seis) { const V = Math.max(...R.seis.res.map(r => Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))); out.push(`Сейсмічна поперечна сила ${kN(V)} кН — ${V > Wmax ? 'перевищує' : 'менша за'} вітрову; тому ${V > Wmax ? 'для низки елементів визначальним є особливе сполучення з сейсмікою' : 'сейсміка не є визначальною для загальної стійкості, але перевіряє вузли консолей'}.`); }
+    if (R.seis) { const V = R.seis.kFix * Math.max(...R.seis.res.filter(r => r.dir !== 'Z').map(r => Math.sqrt(r.modes.reduce((a, m) => a + m.base * m.base, 0)))); out.push(`Сейсмічна поперечна сила ${kN(V)} кН — ${V > Wmax ? 'перевищує' : 'менша за'} вітрову; тому ${V > Wmax ? 'для низки елементів визначальним є особливе сполучення з сейсмікою' : 'сейсміка не є визначальною для загальної стійкості, але перевіряє вузли консолей'}.`); }
     const groups = new Map(); R.memberRes.forEach(m => { const g = groups.get(m.e.group); if (!g || m.best.u > g.best.u) groups.set(m.e.group, m); });
     for (const m of groups.values()) {
       const why = m.best.u < 0.35 ? 'переріз визначено конструктивними обмеженнями (мінімальна товщина стінки для зварювання і корозійний запас), а не міцністю — можливий підбір легшого перерізу' : m.best.u > 1 ? 'переріз недостатній' : 'переріз використано раціонально';

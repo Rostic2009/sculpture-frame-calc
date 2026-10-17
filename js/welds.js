@@ -97,11 +97,13 @@
           const r = W.tubeContour(e.sec.b, kf, f, e.steel, el, { gammaC: pr.frame.gammaC });
           if (!best || r.u > best.u) best = Object.assign(r, { combo: s.cb.id + ': ' + s.cb.name, f });
         }
-        if (R.seis) for (const S of R.seis.res) {
-          const fs = R.seis.staticForces[k][end ? 4 : 0], fe2 = S.env[k][end ? 4 : 0];
-          const f = { N: Math.abs(fs.N) + fe2.N, Vy: Math.abs(fs.Vy) + fe2.Vy, Vz: Math.abs(fs.Vz) + fe2.Vz, T: Math.abs(fs.T) + fe2.T, My: Math.abs(fs.My) + fe2.My, Mz: Math.abs(fs.Mz) + fe2.Mz };
+        if (R.seis && R.seis.kFrame > 0) {
+          // зварні з'єднання: m = 1,0 (ДБН В.1.1-12:2025, табл. 7.7)
+          const kE = R.seis.kFrame / SC.norms.seismicM.weld;
+          const fs = R.seis.staticForces[k][end ? 4 : 0], fe2 = R.seis.envU[k][end ? 4 : 0];
+          const f = { N: Math.abs(fs.N) + kE * fe2.N, Vy: Math.abs(fs.Vy) + kE * fe2.Vy, Vz: Math.abs(fs.Vz) + kE * fe2.Vz, T: Math.abs(fs.T) + kE * fe2.T, My: Math.abs(fs.My) + kE * fe2.My, Mz: Math.abs(fs.Mz) + kE * fe2.Mz };
           const r = W.tubeContour(e.sec.b, kf, f, e.steel, el, { gammaC: pr.frame.gammaC });
-          if (!best || r.u > best.u) best = Object.assign(r, { combo: 'E' + S.dir, f });
+          if (!best || r.u > best.u) best = Object.assign(r, { combo: 'E: сейсмічна ситуація', f });
         }
           if (best && best.u <= 1) break;
         }

@@ -41,7 +41,7 @@
     out.Sk1 = S0 * out.Ce * out.CaltS;
     // --- сейсміка
     const sz = s.seismic;
-    out.seis = { on: !!sz.on, a0: N.seismicA0[sz.intensity] || 0, soil: sz.soil, k1: sz.k1, k2: sz.k2, kgr: sz.kgr, kpsi: sz.kpsi, intensity: sz.intensity };
+    out.seis = { on: !!sz.on, soil: sz.soil || 'II' }; // параметри рівнів впливу — N.seismicSite (у розрахунку, коли відома геометрія)
     out.gammaN = s.gammaN;
     return out;
   };
@@ -273,23 +273,28 @@
   /** Сейсмічні маси у вузлах (кг) для особливого сполучення: (0,9·G + 0,5·S)·γ / g. */
   L.seismicMasses = function (cases, P, clim) {
     const mass = new Float64Array(P.nn);
-    const gG = SC.norms.gammaG.steel, kc = SC.norms.seismicComb;
+    // ф. (7.1): ΣG_k + Σψ_E·Q_k — характеристичні значення (без γ_f); сніг — короткочасне на покриття, ψ_E = 0,5
+    const kc = SC.norms.seismicComb;
     const addCase = (c, k) => {
       for (const n of c.nodal) mass[P.idx.get(n.node)] += -n.f[2] * k / g;
       for (const d of c.dist) { const el = P.els[d.elem]; const m = -d.w[2] * el.L * k / g / 2; mass[el.ni] += m; mass[el.nj] += m; }
     };
-    addCase(cases.G, kc.G * gG);
-    addCase(cases.S, kc.snow * clim.gfmS);
+    addCase(cases.G, kc.G);
+    addCase(cases.S, kc.snow);
     for (let i = 0; i < mass.length; i++) if (mass[i] < 0) mass[i] = 0;
     return mass;
   };
 
-  /** Спектральний розрахунок: для кожної форми — інерційні сили S_ik у вузлах (напрямок dir 0/1/2). */
+  /**
+   * Спектральний метод: інерційні сили форми i у вузлі k (напрямок dir 0/1/2) при a₀ = 1 і γpl = 1:
+   *   S_ik = m_k·g·β_i·η_ik, η_ik·m_k = m_k·φ_ik·Γ_i (форми нормовані за масою).
+   *  Розрахункові значення — множенням на a₀·γpl·γI/m (ДБН В.1.1-12:2025, ф. (7.3), табл. 7.3, 7.4, 7.7).
+   */
   L.seismicModalLoads = function (P, masses, modal, clim, dir, factor) {
     const sz = clim.seis;
     return modal.modes.map((md, i) => {
       const beta = SC.norms.seismicBeta(md.T, sz.soil);
-      const Sa = sz.k1 * sz.k2 * sz.kgr * sz.a0 * g * beta * sz.kpsi * (factor || 1);
+      const Sa = g * beta * (factor || 1);
       const nodal = [];
       P.model.nodes.forEach((nd, k) => {
         const m = masses[k]; if (!m) return;
