@@ -412,15 +412,57 @@
   // =====================================================================
   // КОМПЛЕКТ
   // =====================================================================
+  /** Підсумкова таблиця: розраховані габарити і розміри деталей (каркас, опорні вузли, анкери, фундамент, армування, оболонка). */
+  RS.dimTable = function (R) {
+    const pr = R.pr, bp = pr.base, fd = pr.found, sp = R.spec, nS = R.supportRes.length;
+    const U = u => (u == null || !isFinite(u)) ? '—' : `U = ${f(u, 2)}`;
+    const head = t => [`<b>${t}</b>`, '', '', '', '', ''];
+    const rows = [];
+    const ns = R.P.model.nodes, ext = k => [Math.min(...ns.map(n => n[k])), Math.max(...ns.map(n => n[k]))];
+    const [x0, x1] = ext('x'), [y0, y1] = ext('y'), [, z1] = ext('z');
+    rows.push(head('1. Габарити'));
+    rows.push(['Скульптура — повна висота', `H = ${f(R.Htot, 2)} м`, '1', '—', `${f(sp.tubeMass + sp.sheetMass + sp.ribMass, 0)} (метал)`, 'вихідні дані / аналіз зображення']);
+    (pr.parts || []).forEach(p => rows.push([`— частина «${esc(p.name)}»`, p.kind === 'dist' ? `z = ${f(p.z1, 2)}…${f(p.z2, 2)} м; A<sub>x</sub> = ${f(p.Ax, 2)} м², A<sub>y</sub> = ${f(p.Ay, 2)} м²` : `консоль до (${f(p.x, 2)}; ${f(p.y, 2)}; ${f(p.z, 2)}) м; A<sub>x</sub> = ${f(p.Ax, 2)} м²`, '1', p.shellArea ? `${f(p.shellArea, 1)} м² оболонки` : '—', '—', 'навітряна площа для вітру']));
+    rows.push(['Каркас — габарит за осями', `${f(x1 - x0, 2)} × ${f(y1 - y0, 2)} × ${f(z1, 2)} м (X × Y × Z)`, `стрижнів: ${R.P.els.length}, вузлів: ${ns.length}`, `${f(R.memberRes.reduce((a, m) => a + m.L, 0), 1)} м`, f(sp.tubeMass, 0), `${R.sectionRes.length} секцій`]);
+    rows.push(['Ядро каркаса', `низ ${f(pr.frame.a, 2)} × ${f(pr.frame.b, 2)} м, верх ${f(pr.frame.aTop, 2)} × ${f(pr.frame.bTop, 2)} м; яруси ${pr.frame.levels.map(z => f(z, 2)).join(' / ')} м`, '1', '—', '—', 'конструктивно, вписано в оболонку']);
+    rows.push(head('2. Каркас — профілі труб'));
+    const byP = new Map();
+    R.memberRes.forEach(m => { const k = m.e.sec.name, r = byP.get(k) || { n: 0, L: 0, Lmax: 0, mass: 0, u: 0, groups: new Set() }; r.n++; r.L += m.L; r.Lmax = Math.max(r.Lmax, m.L); r.mass += m.mass; r.u = Math.max(r.u, m.best.u); r.groups.add(m.e.group); byP.set(k, r); });
+    [...byP].sort((a, b) => b[1].mass - a[1].mass).forEach(([k, r]) => rows.push([`Труба ${k} (${esc([...r.groups].join(', '))})`, `${k} мм, сталь ${esc(R.mdl.steel.id)}; найдовший стрижень ${f(r.Lmax, 2)} м`, `${r.n} шт.`, `${f(r.L, 2)} м`, f(r.mass, 1), U(r.u)]));
+    rows.push(head('3. Опорні вузли й анкерні болти'));
+    const uSup = Math.max(0, ...R.supportRes.map(x => x.best.u));
+    rows.push(['Опорна плита', `${bp.plateB} × ${bp.plateL} × ${bp.tp} мм`, `${nS} шт.`, '—', f(sp.plateMass, 1), U(uSup)]);
+    if (bp.nRibs) rows.push(['Ребра жорсткості', `h = ${bp.hr} мм, t = ${bp.tr} мм`, `${bp.nRibs * nS} шт.`, '—', '—', 'розрахунок плити']);
+    const la = bp.type === 'embed' ? bp.hef + 10 : bp.hef + bp.tp + 30 + 2 * bp.d + 40;
+    rows.push([bp.type === 'embed' ? 'Анкер-шпилька з головкою' : 'Фундаментний болт', `М${bp.d}, клас ${esc(bp.grade)}; L = ${f(la, 0)} мм; h<sub>ef</sub> = ${bp.hef} мм; анкерна плита Ø${bp.dh}`, `${bp.nAnchor * nS} шт. (${bp.nAnchor} на вузол)`, `${f(la * bp.nAnchor * nS / 1000, 2)} м`, f(sp.anchorMass, 1), U(uSup)]);
+    rows.push(head('4. Бетонна основа'));
+    const uF = R.found.govUls && R.found.govUls.chk ? R.found.govUls.chk.max : null;
+    rows.push(['Фундаментна плита', `${f(fd.B, 2)} × ${f(fd.L, 2)} × ${f(fd.h, 2)} м, бетон ${esc(fd.concrete)}`, '1', `${f(fd.B * fd.L * fd.h, 2)} м³`, f(fd.B * fd.L * fd.h * fd.rhoC, 0), U(uF)]);
+    if (fd.pedH > 0) rows.push(['Підколонник', `${f(fd.pedB, 2)} × ${f(fd.pedL, 2)} × ${f(fd.pedH, 2)} м`, '1', `${f(fd.pedB * fd.pedL * fd.pedH, 2)} м³`, f(fd.pedB * fd.pedL * fd.pedH * fd.rhoC, 0), 'конструктивно (під анкери)']);
+    rows.push(['Глибина закладання', `d = ${f(fd.depth, 2)} м`, '—', `разом бетону ${f(sp.Vc, 2)} м³`, f(sp.Vc * fd.rhoC, 0), `осідання s = ${f(R.found.settle.s * 1000, 1)} мм ≤ ${f(fd.sLim * 1000, 0)} мм`]);
+    rows.push(head('5. Армування'));
+    (R.found.rebar.rows || []).forEach(r => rows.push([`Поз. ${r.pos}. ${esc(r.name)}`, `Ø${r.dia} ${esc(fd.rebar)}, l = ${f(r.len, 2)} м`, `${r.cnt} шт.`, `${f(r.total, 1)} м`, f(r.mass, 1), r.pos <= 4 && R.found.slab.bx ? `сітка Ø${R.found.slab.bx.pick.dia} крок ${R.found.slab.bx.pick.s} мм` : '—']));
+    rows.push(['Разом арматури', '', '', `${f(R.found.rebar.rows.reduce((a, r) => a + r.total, 0), 1)} м`, f(R.found.rebar.total, 1), '']);
+    if ((R.shellRes || []).length) {
+      rows.push(head('6. Оболонка і допоміжні ребра'));
+      R.shellRes.forEach(x => rows.push([`Оболонка «${esc(x.part)}»`, `лист t = ${f(x.t * 1000, 1)} мм; ребра ${x.rib.h}×${x.rib.t} мм з кроком ${f(x.s * 1000, 0)} мм`, '—', '—', f(x.ribMass, 1) + ' (ребра)', U(x.u)]));
+    }
+    rows.push(['<b>Разом металу (каркас + оболонка + вузли)</b>', '', '', '', `<b>${f(sp.tubeMass + sp.sheetMass + sp.ribMass + sp.plateMass + sp.anchorMass, 0)}</b>`, '']);
+    return '<h2>Підсумкова таблиця: розраховані габарити і розміри деталей</h2><p>Усі розміри — результат розрахунку або конструктивні (зазначено). U — коефіцієнт використання визначальної перевірки (U ≤ 1 — умова виконана; запас = 1 − U).</p>' +
+      F().tbl(['Елемент', 'Габарити / розміри / переріз', 'Кількість', 'Довжина / об’єм', 'Маса, кг', 'Підстава'], rows);
+  };
+
   RS.full = function (R) {
     const pr = R.pr, sp = R.spec;
     const s = [header(R, 'Розрахунок каркаса скульптури: комплект звітів', 'Комплект')];
-    s.push('<h2>Зміст</h2><ol class="toc"><li>Звіт 4. Навантаження і впливи (з перевіркою даних регіону)</li><li>Звіт 1. Каркас: підбір профільних труб</li><li>Звіт 2. Анкерні болти</li><li>Звіт 3. Бетонна основа й армування</li><li>Підсумок матеріалів і висновки</li></ol>');
+    s.push('<h2>Зміст</h2><ol class="toc"><li>Звіт 4. Навантаження і впливи (з перевіркою даних регіону)</li><li>Звіт 1. Каркас: підбір профільних труб</li><li>Звіт 2. Анкерні болти</li><li>Звіт 3. Бетонна основа й армування</li><li>Підсумок: габарити й розміри деталей, матеріали, висновки</li></ol>');
     s.push('<section class="rep-part"><h1>Звіт 4. Навантаження і впливи</h1>' + RS.loads(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Звіт 1. Каркас</h1>' + RS.frame(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Звіт 2. Анкерні болти</h1>' + RS.anchors(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Звіт 3. Бетонна основа</h1>' + RS.base(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Підсумок</h1>');
+    s.push(RS.dimTable(R));
+    s.push('<h2>Матеріали і вартість</h2>');
     s.push(F().tbl(['Матеріал', 'Кількість', 'Маса'], [
       ['Труби каркаса', `${f(R.memberRes.reduce((a, m) => a + m.L, 0), 1)} м`, `${f(sp.tubeMass, 0)} кг`],
       ['Лист оболонки + ребра', '—', `${f(sp.sheetMass + sp.ribMass, 0)} кг`],
