@@ -70,8 +70,8 @@
     ]));
     H(3, '3.2. Частини скульптури');
     s.push(tbl(['Частина', 'Тип', 'Центр x; y; z, м', 'Оболонка A, м² × t, мм', 'Маса, кг', 'Aₓ / A_y, м²', 'C_F', 'A_h, м² · μ'],
-      pr.parts.map((p, i) => { const pa = R.mdl.partAttach.find(a => a.part === i); return [esc(p.name), p.kind === 'cant' ? 'консоль' : `по висоті ${f(p.z1, 2)}…${f(p.z2, 2)} м`, `${f(p.x)}; ${f(p.y)}; ${f(p.z)}`, `${f(p.shellArea, 2)} × ${f(p.tShell, 1)}`, f(pa.mass, 1), `${f(p.Ax)} / ${f(p.Ay)}${p.areaTable ? ' (3D)' : ''}`, f(p.Cf, 2) + (p.CfConfirmed ? '' : ' *'), `${f(p.Ah)} · ${f(p.mu, 2)}`]; })));
-    P('Маса оболонки частини: m = ρ·t·A + m<sub>дод</sub> (m<sub>дод</sub> включає ребра допоміжного каркаса листа). * — аеродинамічний коефіцієнт не підтверджено експериментом/CFD. Джерела геометрії: ' + [...new Set(pr.parts.map(p => p.source === 'image' ? 'зображення (маски, масштаб, 3D з проєкцій)' : p.source === '3d' ? '3D-модель STL/OBJ' : 'ручне введення'))].join('; ') + (pr.parts.some(p => p.status === 'assumed') ? '. Частини з припущеною глибиною позначено в таблиці частин.' : '.'));
+      pr.parts.map((p, i) => { const pa = R.mdl.partAttach.find(a => a.part === i); return [esc(p.name), p.kind === 'cant' ? 'консоль' : p.kind === 'train' ? `шлейф: ферма з опорами, z = ${f(p.z1, 2)}…${f(p.z2, 2)} м` : `по висоті ${f(p.z1, 2)}…${f(p.z2, 2)} м`, `${f(p.x)}; ${f(p.y)}; ${f(p.z)}`, `${f(p.shellArea, 2)} × ${f(p.tShell, 1)}`, f(pa.mass, 1), `${f(p.Ax)} / ${f(p.Ay)}${p.areaTable ? ' (3D)' : ''}`, f(p.Cf, 2) + (p.CfConfirmed ? '' : ' *'), `${f(p.Ah)} · ${f(p.mu, 2)}`]; })));
+    P('Маса оболонки частини: m = ρ·t·A + m<sub>дод</sub> (m<sub>дод</sub> включає ребра допоміжного каркаса листа). * — аеродинамічний коефіцієнт не підтверджено експериментом/CFD. Джерела геометрії: ' + [...new Set(pr.parts.map(p => p.source === 'image' ? 'зображення (НЕ допускається — див. попередження)' : p.source === '3d' ? '3D-модель STL/OBJ' : p.source === 'sketch' ? 'ескіз (лише поділ, розмірів немає)' : 'ручне введення (креслення)'))].join('; ') + (pr.parts.some(p => p.status === 'assumed') ? '. Частини з припущеною глибиною позначено в таблиці частин.' : '.'));
     H(3, '3.3. Каркас і матеріали');
     const steel = R.mdl.steel;
     s.push(tbl(['Параметр', 'Значення'], [
@@ -230,6 +230,7 @@
     H(2, '12. Оболонка та допоміжний каркас');
     s.push(tbl(['Частина', 't, мм', 'Крок ребер, мм', 'σ, МПа', 'w, мм', 'Ребро', 'U'], (R.shellRes || []).map(x => [esc(x.part), f(x.t * 1000, 1), f(x.s * 1000, 0), MPa(x.panel.sig), f(x.panel.w * 1000, 2), `${x.rib.h}×${x.rib.t}`, U(x.u)])));
     // 13
+    s.push(SC.reports.geom3d(R));
     H(2, '13. Відомість матеріалів');
     s.push(Rp.specTable(R.spec));
     s.push(SC.reports.dimTable(R).replace('<h2>', '<h3>').replace('</h2>', '</h3>'));

@@ -21,6 +21,7 @@
     if (pr.site.temp && pr.site.temp.mode !== 'manual') { const tc = N.tempClimate(pr.site.temp); pr.site.temp.dTplus = +tc.dTw.toFixed(1); pr.site.temp.dTminus = +tc.dTc.toFixed(1); pr.site.temp.calc = tc; }
     // ожеледь і W_B — з Додатка Е для міста (якщо обрано режим «за містом»)
     if (pr.site.ice && pr.site.ice.mode !== 'manual') { const ct = N.cityByName(pr.site.city); if (ct) { pr.site.ice.b = ct.b; pr.site.ice.WB = ct.WB; } }
+    SC.model.normalizeParts(pr);
     // ---------- 0. оболонка: крок ребер допоміжного каркаса і їхня маса (додається до маси частин) ----------
     const climPre = SC.loads.climate(pr, null);
     const shellRes = (pr.parts || []).map(p => {
@@ -127,7 +128,20 @@
     const stations = [0, 0.25, 0.5, 0.75, 1];
     const postSec = SC.sections.byName(pr.frame.secPost) || SC.sections.shs(100, 5);
     const plateSteel = N.steels.find(s => s.id === pr.frame.steel) || N.steels[1];
-    const baseOpts = nd => ({ pedB: pr.found.pedB, pedL: pr.found.pedL, pedH: pr.found.pedH, slabH: 0, px: nd.x, py: nd.y, electrode: pr.design.electrode });
+    // опори шлейфу стоять на окремих фундаментах-подушках (або на спільній плиті) — підколонник і переріз стійки свої
+    const pads = A.trainPads(pr, mdl);
+    const padOf = new Map(); pads.forEach(pd => pd.nodes.forEach(id => padOf.set(id, pd)));
+    const shared = pr.found.trainMode === 'shared';
+    const baseOpts = nd => {
+      const pd = !shared && padOf.get(nd.id);
+      if (pd) return { pedB: pd.fd.pedB, pedL: pd.fd.pedL, pedH: pd.fd.pedH, slabH: pd.fd.h, px: nd.x - pd.cx, py: nd.y - pd.cy, electrode: pr.design.electrode };
+      return { pedB: pr.found.pedB, pedL: pr.found.pedL, pedH: pr.found.pedH, slabH: 0, px: nd.x - (shared ? pr.found.cx || 0 : 0), py: nd.y - (shared ? pr.found.cy || 0 : 0), electrode: pr.design.electrode };
+    };
+    const supSec = nd => {
+      if (nd.train == null) return postSec;
+      const tp = pr.parts[nd.train] || {};
+      return SC.sections.byName(tp.secPost || SC.model.trainDefaults.secPost) || postSec;
+    };
     const solveAll = (list, sec2) => {
       const out = []; let eq = 0, nc = 0;
       for (let ci = 0; ci < list.length; ci++) {
@@ -151,12 +165,12 @@
       for (let it = 0; it < 4; it++) {
         const sv = solveAll(sub, false).out;
         let change = 0;
-        const sup = P.model.nodes.filter(n => n.sup || n.baseSpring);
+        const sup = P.model.nodes.filter(n => (n.sup || n.baseSpring) && n.train == null);
         const ks = sup.map(nd => {
           let gov = null, gm = -1;
           for (const s of sv) { const rr = s.r.reactions.find(x => x.node === nd.id); if (!rr) continue; const m = Math.hypot(rr.r[3], rr.r[4]); if (m > gm) { gm = m; gov = rr.r; } }
           if (!gov) return null;
-          const b = SC.base.baseNode(pr.base, gov, postSec, plateSteel, baseOpts(nd));
+          const b = SC.base.baseNode(pr.base, gov, supSec(nd), plateSteel, baseOpts(nd));
           return b.stiff;
         });
         sup.forEach((nd, i) => {
@@ -181,7 +195,7 @@
     // Відгуки рахуються при a₀ = 1, γpl = 1 для трьох напрямків (X, Y, Z); форми — SRSS; напрямки — SRSS (п. 7.4.13, несиметрична споруда).
     // Розрахункові множники (ф. 7.3): каркас — γn·γI·γpl·a₀/m; анкери, закладні, загальна стійкість — γpl = 1 (табл. 7.4, р. 1).
     let seis = null;
-    const body = (pr.parts || []).filter(p => p.kind !== 'cant').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null);
+    const body = (pr.parts || []).filter(p => p.kind === 'dist').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null);
     const Bw = body ? Math.min(body.Ax, body.Ay) / Math.max(0.1, (body.z2 || 1) - (body.z1 || 0)) : Math.min(pr.frame.a, pr.frame.b);
     const seisSite = N.seismicSite(pr.site.seismic, pr.site.cc, Hsc, Bw);
     seisSite.notes.forEach(t => W('error', 'Сейсміка: ' + t + '.', 'seis'));
@@ -300,7 +314,7 @@
     const supportRes = supNodes.map(nd => {
       let best = { u: -1 };
       const consider = (r, name) => {
-        const b = SC.base.baseNode(pr.base, r, postSec, plateSteel, baseOpts(nd));
+        const b = SC.base.baseNode(pr.base, r, supSec(nd), plateSteel, baseOpts(nd));
         const u = b.fail ? 99 : b.max;
         if (u > best.u) best = { u, b, r, combo: name };
       };
@@ -312,7 +326,7 @@
       }
       // класифікація бази за жорсткістю (EN 1993-1-8, 5.2.2.5)
       const Lc = mdl.posts === 1 ? mdl.H : (mdl.levels[1] || mdl.H);
-      const EIL = N.E * postSec.Iy / Lc;
+      const EIL = N.E * supSec(nd).Iy / Lc;
       const st = best.b && best.b.stiff ? Math.min(best.b.stiff.kx, best.b.stiff.ky) : 0;
       best.cls = st >= 30 * EIL ? 'жорстка' : st <= 0.5 * EIL ? 'номінально шарнірна' : 'напівжорстка';
       best.ratio = st / EIL;
@@ -324,15 +338,26 @@
 
     // ---------- 10. фундамент ----------
     const fd = Object.assign({}, pr.found, { gammaN: pr.site.gammaN || 1 });
-    const supPos = id => { const n = P.model.nodes[P.idx.get(id)]; return { x: n.x, y: n.y }; };
+    const supPos = id => { const n = P.model.nodes[P.idx.get(id)]; return shared ? { x: n.x - (fd.cx || 0), y: n.y - (fd.cy || 0) } : { x: n.x, y: n.y }; };
+    // реакції на основну плиту: опори ядра; при «з'єднаних» подушках — ще й горизонтальні сили подушок через рандбалки
+    const tie = pr.found.trainMode === 'tie';
+    const onSlab = list => {
+      const out = [];
+      for (const x of list) {
+        const pd = !shared && padOf.get(x.node);
+        if (!pd) { out.push(Object.assign(supPos(x.node), { r: x.r })); continue; }
+        if (tie) { const n = P.model.nodes[P.idx.get(x.node)]; out.push({ x: n.x, y: n.y, r: [x.r[0], x.r[1], 0, 0, 0, 0] }); }
+      }
+      return out;
+    };
     const soil = fd.soilMode === 'calc' ? SC.concrete.soilRLayer(fd) : null;
     const Rsoil = fd.soilMode === 'calc' ? soil.R : fd.R;
     const fSls = [], fUls = [];
-    for (const cb of sls) { if (!cb.r) continue; const res = SC.found.resultant(fd, cb.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), 1.0); fSls.push({ cb, res, chk: SC.found.check(fd, res, Rsoil, 'sls') }); }
-    for (const s of solved) { const kG = s.cb.favourable ? 0.9 : 1.1; const res = SC.found.resultant(fd, s.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), kG); const chk = SC.found.check(fd, res, Rsoil, 'uls'); chk.res = res; fUls.push({ cb: s.cb, res, chk }); }
+    for (const cb of sls) { if (!cb.r) continue; const res = SC.found.resultant(fd, onSlab(cb.r.reactions), 1.0); fSls.push({ cb, res, chk: SC.found.check(fd, res, Rsoil, 'sls') }); }
+    for (const s of solved) { const kG = s.cb.favourable ? 0.9 : 1.1; const res = SC.found.resultant(fd, onSlab(s.r.reactions), kG); const chk = SC.found.check(fd, res, Rsoil, 'uls'); chk.res = res; fUls.push({ cb: s.cb, res, chk }); }
     if (seis && seis.kFix > 0) for (const s1 of [1, -1]) {
       // загальна стійкість (перекидання, зсув) і тиск: γpl = 1 (табл. 7.4, р. 1), вага з коефіцієнтом 1,0 (ф. 7.3), вертикальна складова — п. 7.4.18
-      const rr = seis.staticR.reactions.map(x => { const re = seis.renvU.get(x.node); return Object.assign(supPos(x.node), { r: x.r.map((v, i) => v + s1 * re[i] * seis.kFix * (i === 2 ? -1 : 1)) }); });
+      const rr = onSlab(seis.staticR.reactions.map(x => { const re = seis.renvU.get(x.node); return { node: x.node, r: x.r.map((v, i) => v + s1 * re[i] * seis.kFix * (i === 2 ? -1 : 1)) }; }));
       const res = SC.found.resultant(fd, rr, 1.0);
       const chk = SC.found.check(fd, res, Rsoil, 'uls'); chk.res = res;
       fUls.push({ cb: { id: `E${s1 > 0 ? '+' : '−'}`, name: `сейсмічна ситуація ${seis.govFix.id}: 1,0·G + 0,5·S ± E (ф. 7.3)` }, res, chk });
@@ -355,11 +380,11 @@
     settle.uS = settle.s / (fd.sLim || 0.1); settle.uT = settle.tilt / (fd.tiltLim || 0.004);
     // підколонник
     const pedN = Math.min(...fUls.map(x => -x.res.Fz));
-    const pedM = Math.max(...fUls.map(x => supNodes.reduce((a, nd) => { const r = (x.cb.id && solved.find(s => s.cb.id === x.cb.id)); const rr = r && r.r.reactions.find(q => q.node === nd.id); return a + (rr ? Math.hypot(rr.r[3], rr.r[4]) : 0); }, 0)));
+    const pedM = Math.max(...fUls.map(x => supNodes.filter(nd => shared || !padOf.has(nd.id)).reduce((a, nd) => { const r = (x.cb.id && solved.find(s => s.cb.id === x.cb.id)); const rr = r && r.r.reactions.find(q => q.node === nd.id); return a + (rr ? Math.hypot(rr.r[3], rr.r[4]) : 0); }, 0)));
     const pedH = Math.max(...fUls.map(x => Math.hypot(x.res.Fx, x.res.Fy)));
     const ped = SC.concrete.pedestal(fd, pedN, pedM, pedH);
     const nA = (pr.base.nAnchor || 4);
-    const rebar = SC.concrete.schedule(fd, slab, ped, pr.base.anchorReinf, supNodes.length, nA);
+    const rebar = SC.concrete.schedule(fd, slab, ped, pr.base.anchorReinf, supNodes.filter(nd => shared || !padOf.has(nd.id)).length, nA);
     if (govSls && govSls.chk.max > 1) W('error', `Фундамент: тиск під підошвою не проходить (U = ${govSls.chk.max.toFixed(2)}, ${govSls.cb.name}).`, 'found');
     if (govUls && govUls.chk.max > 1) W('error', `Фундамент: несуча здатність основи, перекидання або зсув не забезпечено (ДБН В.2.1-10, п. 8.9; U = ${govUls.chk.max.toFixed(2)}, ${govUls.cb.name}).`, 'found');
     // сейсміка, табл. 7.8: продавлювання монолітної плити в сейсмічній ситуації — E_d/R_d ≤ s (s +20 % при 7–9 балах)
@@ -380,6 +405,16 @@
     if (slab.crack > 1) W('warn', `Тріщиностійкість: діаметр стрижнів більший за допустимий φ*_s = ${slab.phiMax} мм при σ_s = ${slab.sigS.toFixed(0)} МПа (EN 1992-1-1, табл. 7.2N).`, 'found');
     if (settle.uS > 1) W('error', `Осідання s = ${(settle.s * 1000).toFixed(0)} мм > s_u = ${(fd.sLim * 1000).toFixed(0)} мм.`, 'found');
     if (settle.uT > 1) W('error', `Крен i = ${settle.tilt.toFixed(4)} > i_u = ${fd.tiltLim}.`, 'found');
+    if (shared) supNodes.forEach(nd => { const q = supPos(nd.id); if (Math.abs(q.x) > fd.pedB / 2 + 0.05 || Math.abs(q.y) > fd.pedL / 2 + 0.05) W(Math.abs(q.x) > fd.B / 2 || Math.abs(q.y) > fd.L / 2 ? 'error' : 'warn', `Спільна плита: опора ${nd.id} (${(nd.x).toFixed(2)}; ${(nd.y).toFixed(2)} м) ${Math.abs(q.x) > fd.B / 2 || Math.abs(q.y) > fd.L / 2 ? 'поза плитою — збільшіть B×L або змістіть центр плити' : 'поза підколонником — передбачте окремий підколонник під опору'}.`, 'found'); });
+    // ---------- 10а. фундаменти опор шлейфу ----------
+    const padRes = shared ? [] : pads.map(pd => A.padCheck(pd, { pr, fd, solved, sls, seis, P, tie, mainSettle: settle }));
+    padRes.forEach(r => {
+      if (r.govUls && r.govUls.chk.max > 1) W('error', `Фундамент ${r.id} (опора шлейфу): несуча здатність, перекидання, відрив або зсув не забезпечено (U = ${r.govUls.chk.max.toFixed(2)}, ${r.govUls.cb.name}) — збільшіть подушку або глибину.`, 'found');
+      if (r.govSls && r.govSls.chk.max > 1) W('error', `Фундамент ${r.id}: тиск під підошвою не проходить (U = ${r.govSls.chk.max.toFixed(2)}).`, 'found');
+      if (r.settle && r.settle.uS > 1) W('error', `Фундамент ${r.id}: осідання ${(r.settle.s * 1000).toFixed(0)} мм > ${(fd.sLim * 1000).toFixed(0)} мм.`, 'found');
+      if (r.diff && r.diff.u > 1) W('error', `Різниця осідань ядра і ${r.id}: Δs/L = ${r.diff.ratio.toFixed(4)} > ${r.diff.lim} (ДБН В.2.1-10, табл. А.1) — шлейф отримає додаткові зусилля; з'єднайте фундаменти або вирівняйте тиск.`, 'found');
+      if (r.tieBeam && r.tieBeam.u > 1) W('error', `Рандбалка до ${r.id}: розтяг/стиск ${(r.tieBeam.N / 1000).toFixed(1)} кН перевищує несучу здатність арматури.`, 'found');
+    });
     if (!fd.layers || !fd.layers.length) W('warn', 'Не задано шари ґрунту — осідання оцінено для однорідної основи (ТЗ 2.3: потрібні інженерно-геологічні вишукування).', 'found');
 
     // ---------- 11. оболонка ----------
@@ -387,7 +422,7 @@
     if (pr.shell.mode !== 'non-structural') W('warn', 'Обрано спільну роботу оболонки й каркаса: у цій версії оболонка в жорсткість не включається — потрібна оболонкова модель МСЕ та погодження конструктора (ТЗ 2.3.3).', 'shell');
 
     // ---------- 12. специфікація ----------
-    const spec = A.specification(pr, mdl, P, memberRes, supNodes, slab, fd, { welds, shellRes, rebar, supportRes });
+    const spec = A.specification(pr, mdl, P, memberRes, supNodes, slab, fd, { welds, shellRes, rebar, supportRes, pads: padRes });
 
     // ---------- 13. інші попередження ----------
     const anyCfDefault = (pr.parts || []).some(p => !p.CfConfirmed) && !(pr.site.aero && pr.site.aero.confirmed);
@@ -405,14 +440,18 @@
     region.rows.filter(r => r.status === 'range' || r.status === 'diff').forEach(r => W(r.status === 'range' ? 'error' : 'warn', `Дані регіону: ${r.param} = ${r.entered} ${r.unit} — ${N.regionStatusText[r.status]} (${r.ref == null ? '—' : r.ref}; ${r.src})${r.note ? '. ' + r.note : ''}.`, 'site'));
     if (!(pr.supports && pr.supports.confirmed)) W('warn', 'Опори не підтверджені користувачем (ТЗ UI-5.4): розрахункову схему закріплення потрібно підтвердити в розділі «Опори».', 'geom');
     if ((pr.parts || []).length === 0) W('error', 'Не задано жодної частини скульптури.', 'geom');
-    (pr.parts || []).forEach(p => { if (p.status === 'assumed') W('warn', `Частина «${p.name}»: геометрія припущена (не підтверджена розмірами).`, 'geom'); });
+    (pr.parts || []).forEach(p => {
+      if (p.source === 'image') W('error', `Частина «${p.name}»: розміри взято з картинки — для розрахунку не допускається (перспектива рендера, глибина не видима). Імпортуйте 3D-модель частини (STL/OBJ) або введіть розміри з креслення.`, 'geom');
+      else if (p.status === 'needs3d' || (p.kind !== 'train' && !(p.Ax > 0 || p.Ay > 0 || p.shellArea > 0))) W('error', `Частина «${p.name}»: геометрію не задано (поділ перенесено з ескізу без розмірів) — імпортуйте 3D або введіть розміри вручну.`, 'geom');
+      else if (p.status === 'assumed') W('warn', `Частина «${p.name}»: геометрія припущена (не підтверджена розмірами).`, 'geom');
+    });
 
     const govMember = memberRes.reduce((m, x) => (x.best.u > (m ? m.best.u : -1) ? x : m), null);
     const status = warn.some(w => w.level === 'error') ? 'not-ok' : anyCfDefault ? 'preliminary' : 'ok';
     return {
       ok: true, time: Date.now() - t0, pr, mdl, P, clim, cases, combos, sls, solved, stations, seis, modalG, T1,
       memberRes, sectionRes, govMember, alphaCr, alphaCombo, uMax, uNode, uCombo, uLim, Htot, supportRes, welds, flexLog, shellRes, vortex,
-      found: { fd, Rsoil, fSls, fUls, govSls, govUls, slab, reinf: slab, settle, ped, rebar, soil },
+      found: { fd, Rsoil, fSls, fUls, govSls, govUls, slab, reinf: slab, settle, ped, rebar, soil, pads: padRes, mode: shared ? 'shared' : tie ? 'tie' : 'pads' },
       spec, warn, status, eqMax, region, posobie,
     };
   };
@@ -445,6 +484,92 @@
     return m;
   }
   function srssArr(list) { const o = new Float64Array(list[0].length); for (const u of list) for (let i = 0; i < o.length; i++) o[i] += u[i] * u[i]; return o.map(Math.sqrt); }
+
+
+  /** Фундаменти під опори шлейфу: одна подушка на станцію-опору (обидві стійки), розміри — з found.pad, не менші за розставлення стійок. */
+  A.trainPads = function (pr, mdl) {
+    const pd0 = Object.assign({ B: 1.2, L: 1.2, h: 0.4, depth: 1.0, pedH: 0.5, margin: 0.3 }, pr.found.pad || {});
+    const groups = new Map();
+    mdl.nodes.filter(n => n.train != null && n.sup && n.tsupport != null).forEach(n => {
+      const k = n.train + ':' + n.tsupport; const g = groups.get(k) || []; g.push(n); groups.set(k, g);
+    });
+    let k = 0;
+    return [...groups.values()].map(ns => {
+      k++;
+      const xs = ns.map(n => n.x), ys = ns.map(n => n.y);
+      const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const dx = Math.max(...xs) - Math.min(...xs), dy = Math.max(...ys) - Math.min(...ys);
+      const pedB = +(dx + 2 * pd0.margin).toFixed(2), pedL = +(dy + 2 * pd0.margin).toFixed(2);
+      const B = +Math.max(pd0.B, pedB + 0.2).toFixed(2), L = +Math.max(pd0.L, pedL + 0.2).toFixed(2);
+      const fdp = Object.assign({}, pr.found, { B, L, h: pd0.h, depth: pd0.depth, pedB, pedL, pedH: pd0.pedH, gammaN: pr.site.gammaN || 1 });
+      return { id: `Ф${k + 1}`, nodes: ns.map(n => n.id), part: ns[0].train, station: ns[0].tsupport, supType: ns[0].supType, cx, cy, fd: fdp };
+    });
+  };
+
+  /** Перевірки подушки: тиск (II гр.), несуча здатність, зсув, перекидання/відрив (I гр.), сейсміка, осідання, різниця осідань з ядром, армування, рандбалка. */
+  A.padCheck = function (pd, ctx) {
+    const { pr, fd, solved, sls, seis, P, tie, mainSettle } = ctx;
+    const fdp = pd.fd, F = SC.found;
+    const Rs = fdp.soilMode === 'calc' ? SC.concrete.soilRLayer(fdp).R : fdp.R;
+    const pos = id => { const n = P.model.nodes[P.idx.get(id)]; return { x: n.x - pd.cx, y: n.y - pd.cy }; };
+    const pick = (list, hzero) => list.filter(x => pd.nodes.includes(x.node)).map(x => Object.assign(pos(x.node), { r: hzero ? [0, 0, x.r[2], x.r[3], x.r[4], x.r[5]] : x.r }));
+    const fSls = [], fUls = [];
+    let Hmax = 0;
+    for (const cb of sls) { if (!cb.r) continue; const res = F.resultant(fdp, pick(cb.r.reactions, tie), 1.0); fSls.push({ cb, res, chk: F.check(fdp, res, Rs, 'sls') }); }
+    for (const s of solved) {
+      const kG = s.cb.favourable ? 0.9 : 1.1;
+      const full = F.resultant(fdp, pick(s.r.reactions, false), kG); Hmax = Math.max(Hmax, Math.hypot(full.Fx, full.Fy));
+      const res = tie ? F.resultant(fdp, pick(s.r.reactions, true), kG) : full;
+      const chk = F.check(fdp, res, Rs, 'uls');
+      // відрив: рівнодійна вгору (вага подушки й ґрунту недостатня) — анкери висмикують фундамент
+      if (res.Fz > 0) { chk.uplift = 1 + res.Fz / Math.max(1, (res.W.Gc + res.W.Gs) * kG); chk.max = Math.max(chk.max, chk.uplift); }
+      fUls.push({ cb: s.cb, res, chk });
+    }
+    if (seis && seis.kFix > 0) for (const s1 of [1, -1]) {
+      const rr = seis.staticR.reactions.filter(x => pd.nodes.includes(x.node)).map(x => { const re = seis.renvU.get(x.node); return Object.assign(pos(x.node), { r: x.r.map((v, i) => (tie && i < 2) ? 0 : v + s1 * re[i] * seis.kFix * (i === 2 ? -1 : 1)) }); });
+      const res = F.resultant(fdp, rr, 1.0); const chk = F.check(fdp, res, Rs, 'uls');
+      if (res.Fz > 0) { chk.uplift = 1 + res.Fz / Math.max(1, res.W.Gc + res.W.Gs); chk.max = Math.max(chk.max, chk.uplift); }
+      fUls.push({ cb: { id: `E${s1 > 0 ? '+' : '−'}`, name: `сейсмічна ситуація: 1,0·G + 0,5·S ± E` }, res, chk });
+    }
+    const govSls = fSls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fSls[0]);
+    const govUls = fUls.reduce((m, x) => x.chk.max > m.chk.max ? x : m, fUls[0]);
+    let settle = null, diff = null;
+    const sMean = fSls.filter(x => x.chk.p).reduce((m, x) => (!m || x.chk.p.pmean > m.chk.p.pmean ? x : m), null);
+    if (sMean) {
+      settle = SC.concrete.settlement(fdp, sMean.chk.p.pmean, sMean.res.Mx, sMean.res.My);
+      settle.uS = settle.s / (fd.sLim || 0.2);
+      const Ld = Math.hypot(pd.cx - (pr.found.cx || 0), pd.cy - (pr.found.cy || 0));
+      const lim = pr.found.dsLim || 0.004;
+      const ratio = Math.abs(settle.s - (mainSettle ? mainSettle.s : 0)) / Math.max(Ld, 0.5);
+      diff = { ratio, lim, u: ratio / lim, L: Ld, s0: mainSettle ? mainSettle.s : 0 };
+    }
+    const reinf = F.reinforce(fdp, fUls.filter(x => x.chk.p && !x.cb.favourable).map(x => ({ p: x.chk.p, res: x.res })));
+    // арматура подушки: дві сітки (низ — за розрахунком, верх — конструктивна того ж діаметра) + каркас підколонника
+    const cov = (fdp.cover || 50) / 1000, dia = reinf.pick.dia, st = reinf.pick.s / 1000;
+    const rows = [];
+    const mesh = (name, Lb, span) => { const cnt = Math.floor((span - 2 * cov) / st) + 1, len = Lb - 2 * cov; rows.push({ name, dia, len, cnt, total: cnt * len, mass: cnt * len * Math.PI * (dia / 1000) ** 2 / 4 * 7850 }); };
+    mesh('Низ, уздовж X', fdp.B, fdp.L); mesh('Низ, уздовж Y', fdp.L, fdp.B); mesh('Верх, уздовж X', fdp.B, fdp.L); mesh('Верх, уздовж Y', fdp.L, fdp.B);
+    if (fdp.pedH > 0) {
+      const nV = 2 * (Math.max(2, Math.ceil(fdp.pedB / 0.2)) + Math.max(2, Math.ceil(fdp.pedL / 0.2))) - 4, lv = fdp.pedH + fdp.h - cov + 0.2;
+      rows.push({ name: 'Підколонник, вертикальні', dia: 12, len: lv, cnt: nV, total: nV * lv, mass: nV * lv * 0.888 });
+      const nH = Math.max(2, Math.ceil(fdp.pedH / 0.2) + 1), lh = 2 * (fdp.pedB + fdp.pedL) - 8 * cov + 0.2;
+      rows.push({ name: 'Підколонник, хомути', dia: 8, len: lh, cnt: nH, total: nH * lh, mass: nH * lh * 0.395 });
+    }
+    // рандбалка до основної плити: 300×400, 4Ø14 A500C, хомути Ø8 крок 200 — зусилля = горизонтальна реакція опори
+    let tieBeam = null;
+    if (tie) {
+      const Ld = Math.hypot(pd.cx - (pr.found.cx || 0), pd.cy - (pr.found.cy || 0));
+      const len = Math.max(0.5, Ld - Math.max(fd.B, fd.L) / 2 - Math.max(fdp.B, fdp.L) / 2);
+      const rb = SC.norms.rebars.find(r => r.id === fd.rebar) || SC.norms.rebars[0];
+      const As = 4 * Math.PI * 0.014 ** 2 / 4, Nrd = As * rb.fyk / 1.15 * 1e6;
+      tieBeam = { b: 0.3, h: 0.4, len, N: Hmax, Nrd, u: Hmax / Nrd, V: 0.3 * 0.4 * len };
+      rows.push({ name: 'Рандбалка, поздовжні 4Ø14', dia: 14, len: len + 0.8, cnt: 4, total: 4 * (len + 0.8), mass: 4 * (len + 0.8) * 1.208 });
+      const nS = Math.ceil(len / 0.2) + 1, ls = 2 * (0.3 + 0.4) - 8 * cov + 0.2;
+      rows.push({ name: 'Рандбалка, хомути', dia: 8, len: ls, cnt: nS, total: nS * ls, mass: nS * ls * 0.395 });
+    }
+    const w = F.weights(fdp);
+    return { id: pd.id, part: pd.part, station: pd.station, supType: pd.supType, cx: pd.cx, cy: pd.cy, nodes: pd.nodes, fd: fdp, Rsoil: Rs, fSls, fUls, govSls, govUls, settle, diff, reinf, rebar: { rows, total: rows.reduce((a, r) => a + r.mass, 0) }, tieBeam, Vc: w.Vslab + w.Vped + (tieBeam ? tieBeam.V : 0) };
+  };
 
   /** Відомість матеріалів і кошторис: чиста кількість, відходи (один раз на позицію), закупівля, вартість. */
   A.specification = function (pr, mdl, P, memberRes, supNodes, slab, fd, ex) {
@@ -492,10 +617,17 @@
     rows.push({ cat: 'Опорні вузли', item: bp.type === 'embed' ? `Шпилька з головкою Ø${bp.d}, L = ${bp.hef + 10} мм (EN ISO 13918)` : `Фундаментний болт М${bp.d} з анкерною плитою Ø${bp.dh}×${bp.tw || 10}, L = ${(la * 1000).toFixed(0)} мм`, mark: bp.type === 'embed' ? 'S235J2+C450' : `клас ${bp.grade}`, std: bp.type === 'embed' ? 'EN ISO 13918' : 'ДСТУ ISO 898-1 / ГОСТ 24379.1', unit: 'шт', net: nA, buy: nA, massNet: am * nA, massBuy: am * nA, note: bp.type === 'embed' ? 'приварка дуговим способом' : `+ ${nA * 2} гайок, ${nA} шайб, шаблон` });
     const w = SC.found.weights(fd);
     const Vc = w.Vslab + w.Vped;
+    const VcAll = Vc + (ex.pads || []).reduce((a, pd) => a + pd.Vc, 0);
     rows.push({ cat: 'Фундамент', item: `Бетон ${fd.concrete}`, mark: fd.concrete, std: 'ДСТУ Б В.2.7-176', unit: 'м³', net: Vc, buy: Vc * 1.03, massNet: Vc * fd.rhoC, massBuy: Vc * fd.rhoC * 1.03, note: `плита ${fd.B}×${fd.L}×${fd.h} м + підколонник ${fd.pedB}×${fd.pedL}×${fd.pedH} м` });
     rows.push({ cat: 'Фундамент', item: 'Бетонна підготовка C8/10, 100 мм', mark: 'C8/10', std: '', unit: 'м³', net: (fd.B + 0.2) * (fd.L + 0.2) * 0.1, buy: (fd.B + 0.2) * (fd.L + 0.2) * 0.1 * 1.03, massNet: 0, massBuy: 0, note: '' });
     rows.push({ cat: 'Фундамент', item: 'Підливка безусадкова під опорні плити, 30 мм', mark: '≥ C30/37', std: '', unit: 'м³', net: nS * (bp.plateB + 100) / 1000 * (bp.plateL + 100) / 1000 * 0.03, buy: nS * (bp.plateB + 100) / 1000 * (bp.plateL + 100) / 1000 * 0.03 * 1.1, massNet: 0, massBuy: 0, note: '' });
-    const rb = ex.rebar || { rows: [], total: 0 };
+    (ex.pads || []).forEach(pd => {
+      const f2 = pd.fd;
+      rows.push({ cat: 'Фундамент', item: `Бетон ${f2.concrete} — фундамент ${pd.id} під опору шлейфу`, mark: f2.concrete, std: 'ДСТУ Б В.2.7-176', unit: 'м³', net: pd.Vc, buy: pd.Vc * 1.03, massNet: pd.Vc * f2.rhoC, massBuy: pd.Vc * f2.rhoC * 1.03, note: `подушка ${f2.B}×${f2.L}×${f2.h} м + підколонник ${f2.pedB}×${f2.pedL}×${f2.pedH} м${pd.tieBeam ? ` + рандбалка 0,3×0,4×${pd.tieBeam.len.toFixed(2)} м` : ''}` });
+      rows.push({ cat: 'Фундамент', item: `Бетонна підготовка C8/10, 100 мм — ${pd.id}`, mark: 'C8/10', std: '', unit: 'м³', net: (f2.B + 0.2) * (f2.L + 0.2) * 0.1, buy: (f2.B + 0.2) * (f2.L + 0.2) * 0.1 * 1.03, massNet: 0, massBuy: 0, note: '' });
+    });
+    const rb0 = ex.rebar || { rows: [], total: 0 };
+    const rb = { rows: rb0.rows.concat((ex.pads || []).flatMap(pd => pd.rebar.rows.map((r, i) => Object.assign({}, r, { pos: `${pd.id}.${i + 1}` })))), total: rb0.total + (ex.pads || []).reduce((a, pd) => a + pd.rebar.total, 0) };
     const byDia = new Map();
     rb.rows.forEach(r => { const x = byDia.get(r.dia) || { L: 0, m: 0, pos: [] }; x.L += r.total; x.m += r.mass; x.pos.push(r.pos); byDia.set(r.dia, x); });
     for (const [dia, x] of [...byDia].sort((a, b) => a[0] - b[0])) rows.push({ cat: 'Фундамент', item: `Арматура Ø${dia}`, mark: fd.rebar, std: 'ДСТУ 3760', unit: 'м', net: x.L, buy: x.L * 1.05, massNet: x.m, massBuy: x.m * 1.05, note: 'поз. ' + x.pos.join(', ') });
@@ -516,7 +648,7 @@
     const costOf = r => r.cat === 'Каркас' ? r.massBuy * pz.tube : r.cat === 'Оболонка' ? r.massBuy * (r.item.startsWith('Ребра') ? pz.tube : pz.sheet) : r.cat === 'Опорні вузли' && !/болт|Шпилька/.test(r.item) ? r.massBuy * pz.plate : /болт|Шпилька/.test(r.item) ? r.buy * pz.anchor : r.item.startsWith('Бетон') ? r.buy * pz.concrete : r.item.startsWith('Арматура') ? r.massBuy * pz.rebar : r.cat === 'Зварювання' ? r.massBuy * (pz.electrode || 120) : r.cat === 'Захист' ? r.buy * (pz.paint || 250) : 0;
     rows.forEach(r => { r.cost = costOf(r) || 0; });
     const total = rows.reduce((s, r) => s + r.cost, 0) + (pz.fabrication || 0) + (pz.transport || 0) + (pz.install || 0);
-    return { rows, tubeMass, sheetMass, ribMass, total, plateMass: plateM * nS, anchorMass: am * nA, Vc, weldTotal, rebarMass: rb.total, nTypes: byGroup.size, nMembers: memberRes.length };
+    return { rows, tubeMass, sheetMass, ribMass, total, plateMass: plateM * nS, anchorMass: am * nA, Vc: VcAll, VcMain: Vc, weldTotal, rebarMass: rb.total, nTypes: byGroup.size, nMembers: memberRes.length };
   };
 
   /** Автоматичний підбір перерізів груп (найлегший типорозмір, для якого U ≤ ціль). Повертає історію ітерацій. */
@@ -529,6 +661,11 @@
     if (pr.frame.type !== 'single') keys.push({ key: 'secRing', group: 'Пояси (кільця)', get: () => pr.frame.secRing, set: v => { pr.frame.secRing = v; } });
     if (pr.frame.type !== 'single' && pr.frame.bracing !== 'none') keys.push({ key: 'secBrace', group: "Зв'язки", get: () => pr.frame.secBrace, set: v => { pr.frame.secBrace = v; } });
     pr.parts.forEach((p, i) => { if (p.kind === 'cant') keys.push({ key: 'part' + i, group: `Консоль: ${p.name}`, get: () => p.sec, set: v => { p.sec = v; } }); });
+    pr.parts.forEach((p, i) => {
+      if (p.kind !== 'train') return;
+      const G = SC.model.trainGroups(p.name), D = SC.model.trainDefaults;
+      [['secChord', G.chord], ['secWeb', G.web], ['secPost', G.post]].forEach(([f, g]) => keys.push({ key: `train${i}.${f}`, group: g, get: () => p[f] || D[f], set: v => { p[f] = v; } }));
+    });
     const pos = name => { const i = cat.findIndex(s => s.name === name); return i >= 0 ? i : cat.findIndex(s => s.mass >= (SC.sections.byName(name) || cat[0]).mass); };
     const idx = keys.map(k => Math.max(0, pos(k.get())));
     const best = keys.map(() => null);
@@ -584,7 +721,9 @@
   /** Підбір фундаменту (ТЗ «Правила зміни конструкції»): мінімальний об'єм бетону, за якого виконуються всі перевірки
    *  основи, стійкості, продавлювання, поперечної сили, осідання й крену. Реакції каркаса — з виконаного розрахунку. */
   A.optimizeFoundation = function (R) {
-    const supPos = id => { const n = R.P.model.nodes[R.P.idx.get(id)]; return { x: n.x, y: n.y }; };
+    const sharedM = R.found.mode === 'shared', cx0 = sharedM ? R.pr.found.cx || 0 : 0, cy0 = sharedM ? R.pr.found.cy || 0 : 0;
+    const supPos = id => { const n = R.P.model.nodes[R.P.idx.get(id)]; return { x: n.x - cx0, y: n.y - cy0 }; };
+    const mainR = list => list.filter(x => { const n = R.P.model.nodes[R.P.idx.get(x.node)]; return sharedM || n.train == null; });
     const base = R.pr.found;
     const minPed = Math.max(base.pedB, base.pedL);
     let best = null; const tried = [];
@@ -594,8 +733,8 @@
       const Rs = fd.soilMode === 'calc' ? SC.concrete.soilRLayer(fd).R : fd.R;
       let u = 0, gov = '';
       const ulsP = [];
-      for (const cb of R.sls) { if (!cb.r) continue; const res = SC.found.resultant(fd, cb.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), 1.0); const c = SC.found.check(fd, res, Rs, 'sls'); if (c.max > u) { u = c.max; gov = cb.name; } }
-      for (const s of R.solved) { const res = SC.found.resultant(fd, s.r.reactions.map(x => Object.assign(supPos(x.node), { r: x.r })), s.cb.favourable ? 0.9 : 1.1); const c = SC.found.check(fd, res, Rs, 'uls'); if (c.max > u) { u = c.max; gov = s.cb.name; } if (!s.cb.favourable) ulsP.push({ p: c.p, res, name: s.cb.id }); }
+      for (const cb of R.sls) { if (!cb.r) continue; const res = SC.found.resultant(fd, mainR(cb.r.reactions).map(x => Object.assign(supPos(x.node), { r: x.r })), 1.0); const c = SC.found.check(fd, res, Rs, 'sls'); if (c.max > u) { u = c.max; gov = cb.name; } }
+      for (const s of R.solved) { const res = SC.found.resultant(fd, mainR(s.r.reactions).map(x => Object.assign(supPos(x.node), { r: x.r })), s.cb.favourable ? 0.9 : 1.1); const c = SC.found.check(fd, res, Rs, 'uls'); if (c.max > u) { u = c.max; gov = s.cb.name; } if (!s.cb.favourable) ulsP.push({ p: c.p, res, name: s.cb.id }); }
       if (u > 1) { tried.push({ B: fd.B, h, u, gov }); continue; }
       const slab = SC.concrete.slab(fd, ulsP, []);
       const uS = Math.max(slab.punching, slab.shearX, slab.shearY);

@@ -90,7 +90,8 @@
     for (let y = -fd.L / 2 + 0.05; y <= fd.L / 2 - 0.05; y += sx) b += line(cx - fd.B * s / 2 + 3, cy - y * s, cx + fd.B * s / 2 - 3, cy - y * s, 'reb');
     for (let x = -fd.B / 2 + 0.05; x <= fd.B / 2 - 0.05; x += sy) b += line(cx + x * s, cy - fd.L * s / 2 + 3, cx + x * s, cy + fd.L * s / 2 - 3, 'reb');
     b += rect(cx - fd.pedB * s / 2, cy - fd.pedL * s / 2, fd.pedB * s, fd.pedL * s, 'ped');
-    R.P.model.nodes.filter(n => n.sup || n.baseSpring).forEach(n => { b += rect(cx + n.x * s - R.pr.base.plateB / 2000 * s, cy - n.y * s - R.pr.base.plateL / 2000 * s, R.pr.base.plateB / 1000 * s, R.pr.base.plateL / 1000 * s, 'pl'); });
+    const sh = R.found.mode === 'shared', ox0 = sh ? (fd.cx || 0) : 0, oy0 = sh ? (fd.cy || 0) : 0;
+    R.P.model.nodes.filter(n => (n.sup || n.baseSpring) && (sh || n.train == null)).map(n => ({ x: n.x - ox0, y: n.y - oy0 })).forEach(n => { b += rect(cx + n.x * s - R.pr.base.plateB / 2000 * s, cy - n.y * s - R.pr.base.plateL / 2000 * s, R.pr.base.plateB / 1000 * s, R.pr.base.plateL / 1000 * s, 'pl'); });
     b += dim(cx - fd.B * s / 2, cy + fd.L * s / 2 + 6, cx + fd.B * s / 2, cy + fd.L * s / 2 + 6, f(fd.B * 1000) + ' мм', 10);
     b += dim(cx + fd.B * s / 2 + 6, cy - fd.L * s / 2, cx + fd.B * s / 2 + 6, cy + fd.L * s / 2, f(fd.L * 1000) + ' мм', 10);
     b += text(cx - fd.B * s / 2, cy - fd.L * s / 2 - 8, `Поз.1/2: Ø${sl.bx.pick.dia}/${sl.bx.pick.s}, Ø${sl.by.pick.dia}/${sl.by.pick.s} (низ)`, 'start', 'tx sm');
@@ -156,6 +157,32 @@
         b += dim(X(F.A), oy + 10, X(F.B), oy + 10, f(F.l * 1000) + ' мм', 6);
         if (k === 0) b += dim(X(F.A) - 40, oy, X(F.A) - 40, oy - fh * s, f(fh * 1000) + ' мм', -12);
       });
+    } else if (sc.kind === 'train' && elems.length) {
+      // шлейф: фасад уздовж осі шлейфу (u, z) і план (u, w); вісь — від першої до останньої точки гребеня
+      const pp = ((R ? R.pr : null) || {}).parts, path = pp && pp[sc.part] && pp[sc.part].path;
+      const e0 = path ? [path[path.length - 1][0] - path[0][0], path[path.length - 1][1] - path[0][1]] : [1, 0];
+      const el = Math.hypot(e0[0], e0[1]) || 1, ex = e0[0] / el, ey = e0[1] / el;
+      const ids = new Set(); elems.forEach(e => { ids.add(e.i); ids.add(e.j); });
+      const ns = [...ids].map(id => byId.get(id));
+      const o = path ? path[0] : [ns[0].x, ns[0].y];
+      const U = n => (n.x - o[0]) * ex + (n.y - o[1]) * ey, Wl = n => -(n.x - o[0]) * ey + (n.y - o[1]) * ex;
+      const u0 = Math.min(...ns.map(U)), u1 = Math.max(...ns.map(U)), z0 = Math.min(0, ...ns.map(n => n.z)), z1 = Math.max(...ns.map(n => n.z));
+      const w0 = Math.min(...ns.map(Wl)), w1 = Math.max(...ns.map(Wl));
+      const s = Math.min(640 / Math.max(u1 - u0, 0.3), 260 / Math.max(z1 - z0, 0.3), 220 / Math.max(w1 - w0, 0.3));
+      W = Math.max(560, (u1 - u0) * s + 140); const hE = (z1 - z0) * s, hP = (w1 - w0) * s; H = hE + hP + 170;
+      const X = n => 80 + (U(n) - u0) * s, YE = n => 60 + hE - (n.z - z0) * s, YP = n => 110 + hE + (Wl(n) - w0) * s;
+      b += text(80, 46, 'Фасад уздовж шлейфу (марки поясів і стійок)', 'start', 'tx sm') + text(80, 100 + hE, 'План (решітка й рами — марки в таблиці)', 'start', 'tx sm');
+      b += line(70, YE({ z: 0 }), 90 + (u1 - u0) * s, YE({ z: 0 }), 'gr');
+      elems.forEach(e => {
+        const a = byId.get(e.i), c = byId.get(e.j);
+        // фасад: пояси, стійки, кріплення; план: решітка, рами (щоб марки не накладалися)
+        const inE = e.role === 'tchord' || e.role === 'post' || e.role === 'tlink', inP = !inE || e.role === 'tchord';
+        if (inE && !(e.role === 'tchord' && /R$/.test(e.j) && /R$/.test(e.i))) { b += line(X(a), YE(a), X(c), YE(c), cls(e)); b += label((X(a) + X(c)) / 2, (YE(a) + YE(c)) / 2 - 4, e.mark); }
+        if (inP) b += line(X(a), YP(a), X(c), YP(c), cls(e));
+      });
+      ns.filter(n => n.sup).forEach(n => { b += `<path d="M${X(n).toFixed(1)},${YE(n).toFixed(1)} l-7,10 h14 z" class="sup"/>`; });
+      b += dim(X({ x: o[0] + u0 * ex, y: o[1] + u0 * ey }), YE({ z: z0 }) + 16, 80 + (u1 - u0) * s, YE({ z: z0 }) + 16, f((u1 - u0) * 1000) + ' мм', 8);
+      b += dim(50, YE({ z: z0 }), 50, YE({ z: z1 }), f((z1 - z0) * 1000) + ' мм', -8);
     } else if (sc.kind === 'cant' && elems.length) {
       const e = elems[0], a = byId.get(e.i), c = byId.get(e.j);
       const r = Math.hypot(c.x - a.x, c.y - a.y), dz = c.z - a.z, L = Lm(e);
@@ -183,10 +210,31 @@
     return svg(W, H, head(W) + b, 'Секція ' + sc.code);
   };
 
+  /** Загальний план фундаментів: основна плита Ф1, подушки опор шлейфу, рандбалки, проєкція каркаса. */
+  D.foundPlan = function (R) {
+    const pads = R.found.pads || []; if (!pads.length) return '';
+    const fd = R.found.fd;
+    const rects = [{ id: 'Ф1', x: 0, y: 0, B: fd.B, L: fd.L }].concat(pads.map(p => ({ id: p.id, x: p.cx, y: p.cy, B: p.fd.B, L: p.fd.L, tie: p.tieBeam })));
+    const xs = rects.flatMap(r => [r.x - r.B / 2, r.x + r.B / 2]), ys = rects.flatMap(r => [r.y - r.L / 2, r.y + r.L / 2]);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    const s = Math.min(520 / Math.max(x1 - x0, 0.5), 260 / Math.max(y1 - y0, 0.5));
+    const W = (x1 - x0) * s + 100, H = (y1 - y0) * s + 110;
+    const X = x => 50 + (x - x0) * s, Y = y => 60 + (y1 - y) * s;
+    let b = text(10, 18, 'Загальний план фундаментів', 'start', 'tt');
+    rects.forEach(r => { if (r.tie) b += rect(Math.min(X(0), X(r.x)), Y(r.y) - 0.15 * s, Math.abs(X(r.x) - X(0)), 0.3 * s, 'ped'); });
+    rects.forEach(r => { b += rect(X(r.x - r.B / 2), Y(r.y + r.L / 2), r.B * s, r.L * s, 'conc') + text(X(r.x), Y(r.y) + 4, r.id, 'middle', 'tx'); });
+    const byId = new Map(R.P.model.nodes.map(n => [n.id, n]));
+    R.mdl.elems.forEach(e => { const a = byId.get(e.i), c = byId.get(e.j); b += line(X(a.x), Y(a.y), X(c.x), Y(c.y), 'gr'); });
+    R.P.model.nodes.filter(n => n.sup || n.baseSpring).forEach(n => { b += `<circle cx="${X(n.x).toFixed(1)}" cy="${Y(n.y).toFixed(1)}" r="3" class="sup"/>`; });
+    b += dim(X(x0), Y(y0) + 14, X(x1), Y(y0) + 14, f((x1 - x0) * 1000) + ' мм', 8);
+    pads.forEach(p => { b += text(X(p.cx), Y(p.cy - p.fd.L / 2) + 14, `${f(p.fd.B * 1000)}×${f(p.fd.L * 1000)}`, 'middle', 'dt'); });
+    return svg(W, H, b, 'План фундаментів');
+  };
+
   /** DXF (R12, ASCII): лінії каркаса (3D), контури плит і фундаменту. */
   // DXF R12 — кодування ANSI: марки транслітеруються (Я2-Р3 → YA2-R3)
-  const TR = { Я: 'YA', К: 'K', Д: 'D', С: 'S', Р: 'R', П: 'P' };
-  const tr = t => String(t).replace(/[ЯКДСРП]/g, c => TR[c]);
+  const TR = { Я: 'YA', К: 'K', Д: 'D', С: 'S', Р: 'R', П: 'P', Ш: 'SH', Х: 'KH', Т: 'T', З: 'Z' };
+  const tr = t => String(t).replace(/[ЯКДСРПШХТЗ]/g, c => TR[c]);
   D.dxf = function (R) {
     const L = [];
     const ln = (layer, a, b) => L.push('0', 'LINE', '8', layer, '10', a[0], '20', a[1], '30', a[2], '11', b[0], '21', b[1], '31', b[2]);

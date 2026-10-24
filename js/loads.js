@@ -105,9 +105,9 @@
         pa.targets.forEach(t => {
           const zg = (p.kind === 'cant' ? p.z : t.z) + hPed;
           const qk = clim.qAt(zg).q / clim.gfmW; // характеристичний тиск з Ch
-          const F = qk * Cf * A * t.share;
+          const F = qk * Cf * A * (t.shareW != null ? t.shareW : t.share);
           Fp += F; Mz += F * zg;
-          pushDistributed(W.nodal, t, [F * d[0], F * d[1], 0], pos, p.kind === 'cant' ? null : [p.x, p.y, t.c[2]]);
+          pushDistributed(W.nodal, t, [F * d[0], F * d[1], 0], pos, p.kind === 'cant' || p.kind === 'train' ? null : [p.x, p.y, t.c[2]]);
         });
         W.info.parts.push({ name: p.name, A, F: Fp, zcp: Fp ? Mz / Fp : 0 });
       });
@@ -210,7 +210,7 @@
       const phiMax = Math.max(1e-12, ...P.model.nodes.map((n, k) => Math.abs(md.phi[k * 6 + dir])));
       // характерний поперечний розмір d (перпендикулярно вітру = уздовж коливань): ширина несучої частини на z_e
       const parts = pr.parts || [];
-      const body = parts.filter(p => p.kind !== 'cant').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null) || parts[0];
+      const body = parts.filter(p => p.kind === 'dist').reduce((m, p) => (!m || (p.z2 - p.z1) > (m.z2 - m.z1) ? p : m), null) || parts[0];
       const hb = body ? Math.max(0.1, (body.z2 || body.z) - (body.z1 || 0)) : 1;
       const d = body ? (dir === 0 ? body.Ay : body.Ax) / hb : 0.5; // Ay — проєкція для вітру вздовж Y, її ширина — розмір уздовж X
       const n = 1 / md.T, Vcr = n * d / St;
@@ -230,10 +230,10 @@
         pa.targets.forEach(t => {
           const k = nodeIdx.get(t.nodes[0]);
           const phi = Math.abs(gov.md.phi[k * 6 + gov.dirIdx]) / gov.phiMax;
-          const F = 0.75 * gov.Vcr ** 2 * gov.Ce * phi * A * t.share / delta;
+          const F = 0.75 * gov.Vcr ** 2 * gov.Ce * phi * A * (t.shareW != null ? t.shareW : t.share) / delta;
           const Fv = gov.dirIdx === 0 ? [F, 0, 0] : [0, F, 0];
           Fp += F;
-          pushDistributed(VX.nodal, t, Fv, pos, p.kind === 'cant' ? null : [p.x, p.y, t.c[2]]);
+          pushDistributed(VX.nodal, t, Fv, pos, p.kind === 'cant' || p.kind === 'train' ? null : [p.x, p.y, t.c[2]]);
         });
         VX.info.parts.push({ name: p.name, F: Fp });
       });

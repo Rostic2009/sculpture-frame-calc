@@ -90,7 +90,7 @@
     H(2, '1.1. Розрахункова схема і секції');
     P(`Просторовий каркас з квадратних гнутозварних труб: ${{ single: 'одна консольна стійка', core3: 'тригранне ядро', core4: 'чотиригранне ядро' }[pr.frame.type]}${pr.frame.type !== 'single' ? `, план ${f(pr.frame.a)}×${f(pr.frame.b)} м унизу → ${f(pr.frame.aTop)}×${f(pr.frame.bTop)} м угорі, зв'язки ${{ X: 'хрестові', Z: 'розкісні', none: 'відсутні' }[pr.frame.bracing]}` : ''}; рівні поясів ${R.mdl.levels.map(z => f(z, 2)).join('; ')} м.
       Модель розраховано цілком методом скінченних елементів (${R.P.nn} вузлів, ${R.P.els.length} стрижнів, ${R.solved.length} сполучень${pr.design.second ? ', 2-й порядок' : ''}); для зручності читання каркас поділено на <b>${R.sectionRes.length} секцій</b>. Марка стрижня: «секція-роль№» (С — стійка, Р — розкіс, П — пояс, К — консоль).`);
-    if (pr.vision && pr.vision.analysis) P('Схему запропоновано за аналізом зображення виробу: ' + esc(pr.vision.analysis.text[pr.vision.analysis.text.length - 1]));
+    if (pr.vision && pr.vision.analysis) P('Початкову ідею схеми взято з ескізу (зображення); розміри частин для розрахунку — лише з 3D-моделі або креслення.');
     s.push(RS.frameImage(R));
     s.push(F().tbl(['Секція', 'Склад', 'Стрижнів', 'Профілі', 'Довжина, м', 'Маса, кг', 'max U', 'Запас', 'Визначальний стрижень'], R.sectionRes.map(sr => [`<span class="sect-chip" style="background:${sr.color}">${sr.code}</span>`, esc(sr.name), sr.members.length, sr.profiles.map(p => `${p.sec} × ${p.n}`).join('<br>'), f(sr.L, 2), f(sr.mass, 1), F().U(sr.uMax), RS.reserve(sr.uMax), sr.gov ? `${sr.gov.e.mark} (${esc(sr.gov.best.combo.split(':')[0])})` : '—'])));
 
@@ -331,6 +331,31 @@
     s.push(checks(ck)); s.push(legend());
     if (sl.deep) P(`<b>Масивна плита:</b> виліт від грані підколонника a<sub>v</sub> = ${f(sl.av * 1000, 0)} мм, робоча висота d = ${f(sl.dBot * 1000, 0)} мм, a<sub>v</sub>/d = ${f(sl.avd, 2)} ≤ 2. Навантаження від підколонника передається на ґрунт значною мірою стиснутими «підкосами» через товщину плити, тому армування, визначене за згином консолі (теорія пластин Кірхгофа), іде в запас. Тривимірні розрахунки товстих фундаментних плит (Є.О. Гоцуляк, П.В. Войтенко, «Опір матеріалів і теорія споруд», 2011, № 87) показують, що плоска модель завищує розтяг в арматурі під колонами; уточнення можливе моделлю «підкіс–затяжка» (EN 1992-1-1, 6.5).`);
     if (Fd.settle.edgeZone) P(`Зони руйнування ґрунту під краями підошви (В.А. Барвашов, НИИОСП; за розв'язком Н.П. Пузиревського при K₀ = 1): H₀ = (p − γh)(ctgφ + φ − π/2)/(πγ) − c/(γ·tgφ) − h = ${f(Fd.settle.edgeZone.H0 * 1000, 0)} мм при крайовому тиску p = ${f(Fd.settle.edgeZone.p, 1)} кПа. ${Fd.settle.edgeZone.H0 > 0 ? `У межах H₀ тиск не розподіляється (компресія) — осідання уточнено: ${f(Fd.settle.sLinear * 1000, 1)} → ${f(Fd.settle.s * 1000, 1)} мм.` : 'Зона не утворюється — основа працює в лінійній стадії, крайові концентрації тиску не виникають.'}`);
+    if (Fd.pads && Fd.pads.length) {
+      H(2, '3.3а. Фундаменти опор шлейфу');
+      P(`Схема: ${Fd.mode === 'tie' ? 'подушки під опори шлейфу, з\'єднані з основною плитою Ф1 рандбалками — горизонтальні сили опор передаються на Ф1' : 'окремі подушки під кожну опору шлейфу'}. Основна плита Ф1 приймає лише опори ядра. Перевірки — ті самі, що для Ф1 (ДБН В.2.1-10, п. 8.6–8.9), плюс відрив подушки (рівнодійна вгору) і різниця осідань з ядром (табл. А.1).`);
+      s.push(SC.drawings.foundPlan(R));
+      Fd.pads.forEach(pd => {
+        const g1 = pd.govUls, g2 = pd.govSls, b0 = g1.chk.bear;
+        H(3, `${pd.id}: опора ${pd.supType === 'slide' ? 'рухома' : pd.supType === 'pinned' ? 'шарнірна' : 'жорстка'} (${pd.nodes.join(', ')}), центр (${f(pd.cx, 2)}; ${f(pd.cy, 2)}) м`);
+        s.push(F().tbl(['Параметр', 'Значення'], [
+          ['Подушка B × L × h', `<b>${f(pd.fd.B)} × ${f(pd.fd.L)} × ${f(pd.fd.h)} м</b>; підколонник ${f(pd.fd.pedB)} × ${f(pd.fd.pedL)} × ${f(pd.fd.pedH)} м; d = ${f(pd.fd.depth)} м`],
+          ['Бетон', `${pd.fd.concrete}; <b>${f(pd.Vc, 2)} м³</b>`],
+          ['Армування', `2 сітки Ø${pd.reinf.pick.dia} крок ${pd.reinf.pick.s} мм (низ — за розрахунком M = ${kN(Math.max(pd.reinf.Mx, pd.reinf.My))} кН·м/м; верх — конструктивна); разом ${f(pd.rebar.total, 1)} кг`],
+          ...(pd.tieBeam ? [['Рандбалка до Ф1', `0,3 × 0,4 м, L = ${f(pd.tieBeam.len, 2)} м, 4Ø14 ${fd.rebar}, хомути Ø8/200; N = ${kN(pd.tieBeam.N)} кН ≤ N<sub>Rd</sub> = ${kN(pd.tieBeam.Nrd)} кН`]] : []),
+        ]));
+        s.push(checks([
+          row('Середній тиск p<sub>m</sub>', `${f(g2.chk.p.pmean / 1000, 1)} кПа`, `R = ${f(pd.Rsoil, 0)} кПа`, g2.chk.pMean, 'ДБН В.2.1-10, п. 8.6.7', 'soil'),
+          row('Крайовий тиск p<sub>max</sub>', `${f(g2.chk.p.pmax / 1000, 1)} кПа`, `1,2R = ${f(1.2 * pd.Rsoil, 0)} кПа`, g2.chk.pMax, 'ДСТУ-Н Б В.2.1-28', 'soil'),
+          row(`Несуча здатність, зсув, перекидання, відрив (${esc(g1.cb.id)})`, b0 && b0.ok ? `F = ${kN(b0.V)} кН; H = ${kN(b0.H)} кН` : (g1.chk.fail || '—'), b0 && b0.ok ? `γ<sub>c</sub>F<sub>u</sub>/γ<sub>n</sub> = ${kN(b0.gC * b0.Fu / b0.gn)} кН` : '—', g1.chk.max, 'ДБН В.2.1-10, п. 8.9; ф. (8.4), (8.7)', 'overturn'),
+          ...(pd.settle ? [row('Осідання s', `${f(pd.settle.s * 1000, 1)} мм`, `s<sub>u</sub> = ${f(fd.sLim * 1000, 0)} мм`, pd.settle.uS, 'ДБН В.2.1-10, дод. А', 'settle')] : []),
+          ...(pd.diff ? [row('Різниця осідань з ядром Δs/L', `|${f(pd.settle.s * 1000, 1)} − ${f(pd.diff.s0 * 1000, 1)}| мм / ${f(pd.diff.L, 2)} м = ${f(pd.diff.ratio, 5)}`, `(Δs/L)<sub>u</sub> = ${pd.diff.lim}`, pd.diff.u, 'ДБН В.2.1-10, табл. А.1', 'settle')] : []),
+          ...(pd.tieBeam ? [row('Рандбалка: осьова сила', `N = ${kN(pd.tieBeam.N)} кН`, `N<sub>Rd</sub> = A<sub>s</sub>f<sub>yd</sub> = ${kN(pd.tieBeam.Nrd)} кН`, pd.tieBeam.u, 'EN 1992-1-1, 3.2', 'rc')] : []),
+        ]));
+        H(3, `Відомість арматури ${pd.id}`);
+        s.push(F().tbl(['Поз.', 'Найменування', 'Ø, мм', 'Довжина 1 шт., м', 'К-сть', 'Загальна довжина, м', 'Маса, кг'], pd.rebar.rows.map((x, i) => [`${pd.id}.${i + 1}`, esc(x.name), x.dia, f(x.len, 2), x.cnt, f(x.total, 1), f(x.mass, 1)])));
+      });
+    }
     H(2, '3.4. Висновок по фундаменту');
     const uF = Math.max(ss.chk.max, uu.chk.max, Fd.settle.uS, Fd.settle.uT, sl.max || 0);
     P(`Фундамент ${f(fd.B)}×${f(fd.L)}×${f(fd.h)} м з підколонником, бетон ${f(w.Vslab + w.Vped, 2)} м³ ${fd.concrete}, арматура ${f(Fd.rebar.total, 0)} кг (2 сітки + каркас підколонника). Визначає ${ss.chk.max >= uu.chk.max ? 'тиск на ґрунт' : 'стійкість проти перекидання/зсуву'}; найбільший U = ${f(uF, 3)} — ${uF <= 1 ? `запас ${f((1 - uF) * 100, 0)} %` : '<b>не забезпечено</b>'}.`);
@@ -422,7 +447,7 @@
     const [x0, x1] = ext('x'), [y0, y1] = ext('y'), [, z1] = ext('z');
     rows.push(head('1. Габарити'));
     rows.push(['Скульптура — повна висота', `H = ${f(R.Htot, 2)} м`, '1', '—', `${f(sp.tubeMass + sp.sheetMass + sp.ribMass, 0)} (метал)`, 'вихідні дані / аналіз зображення']);
-    (pr.parts || []).forEach(p => rows.push([`— частина «${esc(p.name)}»`, p.kind === 'dist' ? `z = ${f(p.z1, 2)}…${f(p.z2, 2)} м; A<sub>x</sub> = ${f(p.Ax, 2)} м², A<sub>y</sub> = ${f(p.Ay, 2)} м²` : `консоль до (${f(p.x, 2)}; ${f(p.y, 2)}; ${f(p.z, 2)}) м; A<sub>x</sub> = ${f(p.Ax, 2)} м²`, '1', p.shellArea ? `${f(p.shellArea, 1)} м² оболонки` : '—', '—', 'навітряна площа для вітру']));
+    (pr.parts || []).forEach(p => p.kind === 'train' ? rows.push([`— шлейф «${esc(p.name)}»`, (() => { const sm = SC.model.trainSummary(p); return sm ? `довжина по гребеню ${f(sm.L, 2)} м; висота ${f(sm.z1, 2)}…${f(sm.z2, 2)} м; ферма ${f(p.w, 2)}…${f(p.wEnd, 2)} × ${f(p.h, 2)}…${f(p.hEnd, 2)} м` : '—'; })(), '1', p.shellArea ? `${f(p.shellArea, 1)} м² оболонки` : '—', '—', `опори на ${(p.supports || []).map(x => f(x * 100, 0) + ' %').join(', ')} довжини`]) : rows.push([`— частина «${esc(p.name)}»`, p.kind === 'dist' ? `z = ${f(p.z1, 2)}…${f(p.z2, 2)} м; A<sub>x</sub> = ${f(p.Ax, 2)} м², A<sub>y</sub> = ${f(p.Ay, 2)} м²` : `консоль до (${f(p.x, 2)}; ${f(p.y, 2)}; ${f(p.z, 2)}) м; A<sub>x</sub> = ${f(p.Ax, 2)} м²`, '1', p.shellArea ? `${f(p.shellArea, 1)} м² оболонки` : '—', '—', 'навітряна площа для вітру']));
     rows.push(['Каркас — габарит за осями', `${f(x1 - x0, 2)} × ${f(y1 - y0, 2)} × ${f(z1, 2)} м (X × Y × Z)`, `стрижнів: ${R.P.els.length}, вузлів: ${ns.length}`, `${f(R.memberRes.reduce((a, m) => a + m.L, 0), 1)} м`, f(sp.tubeMass, 0), `${R.sectionRes.length} секцій`]);
     rows.push(['Ядро каркаса', `низ ${f(pr.frame.a, 2)} × ${f(pr.frame.b, 2)} м, верх ${f(pr.frame.aTop, 2)} × ${f(pr.frame.bTop, 2)} м; яруси ${pr.frame.levels.map(z => f(z, 2)).join(' / ')} м`, '1', '—', '—', 'конструктивно, вписано в оболонку']);
     rows.push(head('2. Каркас — профілі труб'));
@@ -437,19 +462,42 @@
     rows.push([bp.type === 'embed' ? 'Анкер-шпилька з головкою' : 'Фундаментний болт', `М${bp.d}, клас ${esc(bp.grade)}; L = ${f(la, 0)} мм; h<sub>ef</sub> = ${bp.hef} мм; анкерна плита Ø${bp.dh}`, `${bp.nAnchor * nS} шт. (${bp.nAnchor} на вузол)`, `${f(la * bp.nAnchor * nS / 1000, 2)} м`, f(sp.anchorMass, 1), U(uSup)]);
     rows.push(head('4. Бетонна основа'));
     const uF = R.found.govUls && R.found.govUls.chk ? R.found.govUls.chk.max : null;
-    rows.push(['Фундаментна плита', `${f(fd.B, 2)} × ${f(fd.L, 2)} × ${f(fd.h, 2)} м, бетон ${esc(fd.concrete)}`, '1', `${f(fd.B * fd.L * fd.h, 2)} м³`, f(fd.B * fd.L * fd.h * fd.rhoC, 0), U(uF)]);
+    rows.push([(R.found.pads || []).length ? 'Фундаментна плита Ф1 (ядро)' : 'Фундаментна плита', `${f(fd.B, 2)} × ${f(fd.L, 2)} × ${f(fd.h, 2)} м, бетон ${esc(fd.concrete)}`, '1', `${f(fd.B * fd.L * fd.h, 2)} м³`, f(fd.B * fd.L * fd.h * fd.rhoC, 0), U(uF)]);
     if (fd.pedH > 0) rows.push(['Підколонник', `${f(fd.pedB, 2)} × ${f(fd.pedL, 2)} × ${f(fd.pedH, 2)} м`, '1', `${f(fd.pedB * fd.pedL * fd.pedH, 2)} м³`, f(fd.pedB * fd.pedL * fd.pedH * fd.rhoC, 0), 'конструктивно (під анкери)']);
     rows.push(['Глибина закладання', `d = ${f(fd.depth, 2)} м`, '—', `разом бетону ${f(sp.Vc, 2)} м³`, f(sp.Vc * fd.rhoC, 0), `осідання s = ${f(R.found.settle.s * 1000, 1)} мм ≤ ${f(fd.sLim * 1000, 0)} мм`]);
+    (R.found.pads || []).forEach(pd => {
+      rows.push([`Фундамент ${pd.id} (опора шлейфу)`, `${f(pd.fd.B, 2)} × ${f(pd.fd.L, 2)} × ${f(pd.fd.h, 2)} м; підколонник ${f(pd.fd.pedB, 2)} × ${f(pd.fd.pedL, 2)} × ${f(pd.fd.pedH, 2)} м; d = ${f(pd.fd.depth, 2)} м`, '1', `${f(pd.Vc, 2)} м³`, f(pd.Vc * pd.fd.rhoC, 0), U(Math.max(pd.govUls.chk.max, pd.govSls.chk.max))]);
+      if (pd.tieBeam) rows.push([`Рандбалка Ф1–${pd.id}`, `0,3 × 0,4 м, 4Ø14 + Ø8/200`, '1', `${f(pd.tieBeam.len, 2)} м`, '—', U(pd.tieBeam.u)]);
+    });
     rows.push(head('5. Армування'));
     (R.found.rebar.rows || []).forEach(r => rows.push([`Поз. ${r.pos}. ${esc(r.name)}`, `Ø${r.dia} ${esc(fd.rebar)}, l = ${f(r.len, 2)} м`, `${r.cnt} шт.`, `${f(r.total, 1)} м`, f(r.mass, 1), r.pos <= 4 && R.found.slab.bx ? `сітка Ø${R.found.slab.bx.pick.dia} крок ${R.found.slab.bx.pick.s} мм` : '—']));
-    rows.push(['Разом арматури', '', '', `${f(R.found.rebar.rows.reduce((a, r) => a + r.total, 0), 1)} м`, f(R.found.rebar.total, 1), '']);
+    (R.found.pads || []).forEach(pd => pd.rebar.rows.forEach((r, i) => rows.push([`Поз. ${pd.id}.${i + 1}. ${esc(r.name)}`, `Ø${r.dia} ${esc(fd.rebar)}, l = ${f(r.len, 2)} м`, `${r.cnt} шт.`, `${f(r.total, 1)} м`, f(r.mass, 1), i < 4 ? `сітка Ø${pd.reinf.pick.dia} крок ${pd.reinf.pick.s} мм` : '—'])));
+    const padsR = (R.found.pads || []).reduce((a, pd) => a + pd.rebar.total, 0), padsL = (R.found.pads || []).reduce((a, pd) => a + pd.rebar.rows.reduce((b, r) => b + r.total, 0), 0);
+    rows.push(['Разом арматури', '', '', `${f(R.found.rebar.rows.reduce((a, r) => a + r.total, 0) + padsL, 1)} м`, f(R.found.rebar.total + padsR, 1), '']);
     if ((R.shellRes || []).length) {
       rows.push(head('6. Оболонка і допоміжні ребра'));
       R.shellRes.forEach(x => rows.push([`Оболонка «${esc(x.part)}»`, `лист t = ${f(x.t * 1000, 1)} мм; ребра ${x.rib.h}×${x.rib.t} мм з кроком ${f(x.s * 1000, 0)} мм`, '—', '—', f(x.ribMass, 1) + ' (ребра)', U(x.u)]));
     }
+    if (pr.segments) rows.push([`Обшивка: сегменти листа (розкрій за 3D)`, `t = ${f(pr.segments.t, 1)} мм; ${pr.segments.list.length} сегментів, найбільший ${f(Math.max(...pr.segments.list.map(q => q.w)) * 1000, 0)} × ${f(Math.max(...pr.segments.list.map(q => q.h)) * 1000, 0)} мм`, `${pr.segments.sheets} листів`, `${f(pr.segments.A, 2)} м²`, f(pr.segments.M, 1), pr.segments.list.every(q => q.fits) ? 'усі вміщуються в лист' : 'є більші за лист']);
     rows.push(['<b>Разом металу (каркас + оболонка + вузли)</b>', '', '', '', `<b>${f(sp.tubeMass + sp.sheetMass + sp.ribMass + sp.plateMass + sp.anchorMass, 0)}</b>`, '']);
     return '<h2>Підсумкова таблиця: розраховані габарити і розміри деталей</h2><p>Усі розміри — результат розрахунку або конструктивні (зазначено). U — коефіцієнт використання визначальної перевірки (U ≤ 1 — умова виконана; запас = 1 − U).</p>' +
       F().tbl(['Елемент', 'Габарити / розміри / переріз', 'Кількість', 'Довжина / об’єм', 'Маса, кг', 'Підстава'], rows);
+  };
+
+  /** Перерізи 3D-моделі (пояси, площі, центр мас) і розкрій обшивки — для звітів. */
+  RS.geom3d = function (R) {
+    const pr = R.pr, sl = pr.slices, g = pr.segments, s = [];
+    if (!sl && !g) return '';
+    if (sl) {
+      s.push(`<h3>Перерізи 3D-моделі по висоті (${esc(sl.name || '')}, крок ${f(sl.step, 2)} м)</h3>`);
+      s.push(F().tbl(['z, м', 'Площа перерізу, м²', 'Периметр, м', 'Габарит X×Y, мм', 'Центр x; y, м', 'Смуга, м', 'Поверхня, м²', 'Маса, кг', 'A_x / A_y, м²'], sl.secs.map((q, k) => { const b = sl.bands[k]; return [f(q.z, 2), q.open ? '—' : f(q.A, 3), f(q.per, 2), `${f((q.bbox.mx[0] - q.bbox.mn[0]) * 1000, 0)}×${f((q.bbox.mx[1] - q.bbox.mn[1]) * 1000, 0)}`, `${f(q.c[0], 3)}; ${f(q.c[1], 3)}`, b ? `${f(b.z0, 2)}…${f(b.z1, 2)}` : '', b ? f(b.A, 3) : '', b ? f(b.m, 1) : '', b ? `${f(b.Ax, 2)} / ${f(b.Ay, 2)}` : '']; })));
+      s.push(`<p>Маса оболонки за 3D: ${f(sl.M, 1)} кг; центр мас (${f(sl.cg[0], 3)}; ${f(sl.cg[1], 3)}; ${f(sl.cg[2], 3)}) м.${sl.core ? ` Ядро вписано в перерізи із зазором: низ ${f(sl.core.a, 2)}×${f(sl.core.b, 2)} м, верх ${f(sl.core.aTop, 2)}×${f(sl.core.bTop, 2)} м, пояси на ${sl.core.levels.join('; ')} м.` : ''}${(pr.parts || []).some(p => p.zProfile) ? ` Маса й вітер частин ${(pr.parts || []).filter(p => p.zProfile).map(p => '«' + esc(p.name) + '»').join(', ')} розподілено по висоті за смугами 3D-моделі.` : ''}</p>`);
+    }
+    if (g) {
+      s.push(`<h3>Розкрій обшивки: ${g.list.length} сегментів листа t = ${f(g.t, 1)} мм</h3>`);
+      s.push(F().tbl(['№', 'Смуга / сектор', 'z, м', 'Площа, м²', 'Розгортка ш×в, мм', 'Маса, кг', 'Лист'], g.list.map(q => [q.n, `${q.band} / ${q.sector}`, `${f(q.z0, 2)}…${f(q.z1, 2)}`, f(q.A, 3), `${f(q.w * 1000, 0)}×${f(q.h * 1000, 0)}`, f(q.m, 1), q.fits ? 'вміщується' : '<b>більший за лист</b>']).concat([['', '<b>Разом</b>', '', `<b>${f(g.A, 2)}</b>`, '', `<b>${f(g.M, 1)}</b>`, `${g.sheets} листів ${f(g.wMax * 1000, 0)}×${f(g.hMax * 1000, 0)}`]])));
+    }
+    return s.join('\n');
   };
 
   RS.full = function (R) {
@@ -457,7 +505,7 @@
     const s = [header(R, 'Розрахунок каркаса скульптури: комплект звітів', 'Комплект')];
     s.push('<h2>Зміст</h2><ol class="toc"><li>Звіт 4. Навантаження і впливи (з перевіркою даних регіону)</li><li>Звіт 1. Каркас: підбір профільних труб</li><li>Звіт 2. Анкерні болти</li><li>Звіт 3. Бетонна основа й армування</li><li>Підсумок: габарити й розміри деталей, матеріали, висновки</li></ol>');
     s.push('<section class="rep-part"><h1>Звіт 4. Навантаження і впливи</h1>' + RS.loads(R, { inner: true }) + '</section>');
-    s.push('<section class="rep-part"><h1>Звіт 1. Каркас</h1>' + RS.frame(R, { inner: true }) + '</section>');
+    s.push('<section class="rep-part"><h1>Звіт 1. Каркас</h1>' + RS.frame(R, { inner: true }) + RS.geom3d(R) + '</section>');
     s.push('<section class="rep-part"><h1>Звіт 2. Анкерні болти</h1>' + RS.anchors(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Звіт 3. Бетонна основа</h1>' + RS.base(R, { inner: true }) + '</section>');
     s.push('<section class="rep-part"><h1>Підсумок</h1>');

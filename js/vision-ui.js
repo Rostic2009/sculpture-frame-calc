@@ -89,7 +89,7 @@
       const partRows = parts.map((p, i) => `<tr><td><span class="sw" style="background:${p.color}"></span><input data-vpart="${i}.name" value="${esc(p.name)}" style="min-width:120px"></td>
         <td><select data-vpart="${i}.parent"><option value="">— скульптура</option>${parts.filter(q => q.id !== p.id).map(q => `<option value="${q.id}" ${p.parent === q.id ? 'selected' : ''}>${esc(q.name)}</option>`).join('')}</select></td>
         <td><select data-vpart="${i}.shape"><option value="volume" ${p.shape !== 'sheet' ? 'selected' : ''}>об'ємна</option><option value="sheet" ${p.shape === 'sheet' ? 'selected' : ''}>відкритий лист</option></select></td>
-        <td><select data-vpart="${i}.kind"><option value="auto" ${!p.kind || p.kind === 'auto' ? 'selected' : ''}>авто</option><option value="dist" ${p.kind === 'dist' ? 'selected' : ''}>по висоті ядра</option><option value="cant" ${p.kind === 'cant' ? 'selected' : ''}>консоль</option></select></td>
+        <td><select data-vpart="${i}.kind"><option value="auto" ${!p.kind || p.kind === 'auto' ? 'selected' : ''}>авто</option><option value="dist" ${p.kind === 'dist' ? 'selected' : ''}>по висоті ядра</option><option value="cant" ${p.kind === 'cant' ? 'selected' : ''}>консоль</option><option value="train" ${p.kind === 'train' ? 'selected' : ''}>шлейф</option></select></td>
         <td>${v ? `<select data-vvis="${i}">${['повністю видима', 'частково перекрита', 'виходить за кадр', 'не видима', 'геометрія припущена'].map(s => `<option ${((p.vis || {})[v.id] || 'повністю видима') === s ? 'selected' : ''}>${s}</option>`).join('')}</select>` : '—'}</td>
         <td class="num">${counts[i + 2] || 0}</td>
         <td><button class="btn small" data-act="visDelPart" data-i="${i}" aria-label="Видалити">✕</button></td></tr>`).join('');
@@ -97,7 +97,7 @@
       const cl = pr.vision.checklist;
       const checklist = [['dims', 'Загальні габарити'], ['parts', 'Основні розміри частин'], ['orient', 'Орієнтація моделі (фронт/бік, напрямок осі Y)'], ['scale', 'Масштаб'], ['shell', 'Відкритість або замкненість оболонки'], ['holes', 'Положення технологічних отворів'], ['supports', 'Реальні точки опирання'], ['cant', 'Довжини виносних елементів'], ['unknown', 'Невідомі або умовно відновлені ділянки']];
       return `<h2>Зображення виробу</h2>
-      <p class="lead">Завантажте фото, художні рендери або креслення (фронтальний і боковий вигляди). Система виділяє скульптуру автоматично за кольором фону; частини (тулуб, голова, руки, книга, плащ) позначаються пензлем, «чарівною паличкою» чи багатокутником. Розміри задаються розмірними лініями й обов'язково підтверджуються — ШІ не переводить припущення в «виміряно» (ТЗ 6.3, UI-ACC-004). Усе працює у браузері, без API.</p>
+      <p class="lead">Завантажте фото, художні рендери або креслення (фронтальний і боковий вигляди). Система виділяє скульптуру автоматично за кольором фону; частини (тулуб, голова, руки, книга, плащ) позначаються пензлем, «чарівною паличкою» чи багатокутником. Зображення — <b>ескіз для ідеї поділу й схеми каркаса</b>; у розрахунок розміри з картинки не потрапляють (рендер має перспективу, глибину не видно, види часто не узгоджені). Усе працює у браузері, без API.</p>
       ${card('1. Файли', `<div class="dropzone" id="visDrop">
           <p><b>Завантажте зображення виробу для аналізу</b><br><span class="note">Фото, рендер або креслення: JPG, PNG, WebP. Можна кілька файлів (фронтальний і боковий вигляди) або перетягнути їх сюди.</span></p>
           <label class="btn primary" for="visFiles">Обрати зображення…</label>
@@ -136,18 +136,18 @@
       ${card('Розміри й масштаб', `<p class="note">Інструмент «Розмір»: клацніть дві точки, введіть число й одиницю, оберіть тип і позначте «підтверджено». Головний розмір задає масштаб s = L<sub>real</sub>/L<sub>px</sub>; решта перевіряються на розбіжність ε (допуск 3 %). Масштаб не переноситься на глибину перспективного зображення.</p>
         <div class="tw"><table class="edit"><thead><tr><th>Значення</th><th>Од.</th><th>Тип</th><th>Частина</th><th>Довжина</th><th>Головний</th><th>Підтв.</th><th>Узгодженість</th><th></th></tr></thead><tbody>${dims || '<tr><td colspan="9">Розмірів немає.</td></tr>'}</tbody></table></div>
         ${conf && conf.list.some(x => x.conflict) ? '<ul class="warns"><li class="error">Конфлікт розмірів: значення не узгоджуються з головним масштабом. Перевірте точки або числа — система не усереднює суперечливі розміри.</li></ul>' : ''}`)}` : ''}
-      ${card('4. Побудова 3D і передача в розрахунок', `<div class="form">
+      ${card('4. Ескіз 3D і поділ на частини', `<p class="banner warn">Картинка в розрахунку <b>не використовується</b>: з неї переноситься лише ідея поділу (назви частин і тип — по висоті ядра, консоль, шлейф) та пропозиція схеми каркаса. Розміри, площі й маси для розрахунку — тільки з 3D-моделі (STL/OBJ) або креслення (вводяться вручну в «Частинах скульптури»).</p><div class="form">
           ${c.fld('vision.depthRatio', 'Глибина частини без бокового виду: частка ширини', '', { step: 0.05, hint: 'позначається як «припущена» геометрія' })}
           ${c.fld('vision.yCenter', 'Центр глибини (y) без бокового виду', 'м', { step: 0.05 })}
         </div>
-        <fieldset class="checklist"><legend>Перед передаванням у розрахунок підтвердіть (ТЗ, 9 «Людина в контурі»):</legend>${checklist.map(([k, l]) => `<label class="mini"><input type="checkbox" data-vcheck="${k}" ${cl[k] ? 'checked' : ''}> ${l}</label>`).join('')}</fieldset>
-        <div class="row"><button class="btn" data-act="visBuild">Побудувати 3D-модель</button><button class="btn primary" data-act="visApply">Передати частини в розрахунок</button></div>
+        <fieldset class="checklist"><legend>Перевірено на ескізі (ТЗ, 9 «Людина в контурі»):</legend>${checklist.map(([k, l]) => `<label class="mini"><input type="checkbox" data-vcheck="${k}" ${cl[k] ? 'checked' : ''}> ${l}</label>`).join('')}</fieldset>
+        <div class="row"><button class="btn" data-act="visBuild">Побудувати 3D-модель</button><button class="btn primary" data-act="visApply">Перенести поділ на частини (без розмірів)</button></div>
         ${c.state.ui.visionBuild ? `<p class="note">Побудовано: ${c.state.ui.visionBuild.parts.length} частин. Перегляд — у розділі <a href="#" data-tab="model3d">3D-модель</a>.</p>` : ''}
-        ${(c.state.ui.visionIssues || []).length ? `<ul class="warns">${c.state.ui.visionIssues.map(t => `<li class="warn">${esc(t)}</li>`).join('')}</ul>` : ''}`)}${pr.vision.analysis ? `<section class="card"><h3>5. Аналіз зображення і пропозиція каркаса</h3>
+        ${(c.state.ui.visionIssues || []).length ? `<ul class="warns">${c.state.ui.visionIssues.map(t => `<li class="warn">${esc(t)}</li>`).join('')}</ul>` : ''}`)}${(() => { const vc = V.viewConsistency(pr); return vc.rows.length ? card('Узгодженість видів', fmt.tbl(['Габарит', 'Ракурс 1', 'Ракурс 2', 'Розбіжність', 'Висновок'], vc.rows.map(r => [r.what, `${esc(r.a)}: ${f(r.av * 1000, 0)} мм`, `${esc(r.b)}: ${f(r.bv * 1000, 0)} мм`, f(r.d * 100, 1) + ' %', r.ok ? c.pill('узгоджено', 'ok') : c.pill('НЕ узгоджено', 'bad')])) + `<p class="note">Допуск ${f(vc.tol * 100, 0)} %. Якщо види не сходяться (різні рендери, перспектива, інша поза), ескіз не можна використовувати навіть як ідею розмірів — потрібна 3D-модель або креслення скульптора.</p>`) : (pr.images.length ? card('Узгодженість видів', '<p class="note">Для перевірки потрібні щонайменше два ракурси (фронтальний + боковий або вигляд зверху) з підтвердженим масштабом.</p>') : ''); })()}${pr.vision.analysis ? `<section class="card"><h3>5. Аналіз зображення і пропозиція каркаса</h3>
         <ul class="concl">${pr.vision.analysis.text.map(t => `<li>${c.esc(t)}</li>`).join('')}</ul>
         ${pr.vision.analysis.cants.length ? c.fmt.tbl(['Винесена частина', 'Тип', 'Винос у плані, мм', 'Висота центру, м', 'Переріз консолі'], pr.vision.analysis.cants.map(ct => [c.esc(ct.name), ct.vertical ? 'над ядром' : 'винос', Math.round(ct.r * 1000), c.f(ct.z, 2), ct.sec])) : ''}
         <p class="note">Аналіз виконано в браузері детермінованими правилами (без API): габарити й профіль оболонки по висоті з масок і масштабу, центр поверхні, виноси. Пропозиція застосовується разом із кнопкою «Передати частини в розрахунок»; її можна змінити в розділі «Схема і генерація».</p>
-        <div class="row"><button class="btn" data-act="visFrame">Застосувати лише каркас</button></div></section>` : ''}`;
+        <div class="row"><button class="btn" data-act="visFrame">Взяти ідею схеми каркаса</button></div><p class="note">Схема (кількість стійок, яруси, перерізи) — лише початкова ідея; після імпорту 3D-моделі уточніть пояси за перерізами («3D-модель» → «Перерізи по висоті»).</p></section>` : ''}`;
     },
     after(c) {
       const drop = document.getElementById('content');
@@ -425,37 +425,46 @@
     c.toast(`Каркас створено за аналізом: ${fr.type === 'single' ? 'одна стійка' : 'ядро ' + fr.a + '×' + fr.b + ' м'}, ${fr.levels.length - 1} ярусів. Перегляньте «Секції каркаса».`);
   }
 
+  /**
+   * Картинка — лише ескіз: з неї в проєкт переходить ПОДІЛ на частини (назви, тип у каркасі: по висоті / консоль / шлейф),
+   * але не розміри, площі чи маси. Розрахункова геометрія — тільки з 3D-моделі (STL/OBJ) або з введених вручну розмірів.
+   * Наявні частини з тією самою назвою зберігають свої розміри.
+   */
   function apply(c) {
-    const pr = proj(), vb = c.state.ui.visionBuild;
-    if (!vb || !vb.parts.length) { c.toast('Спочатку побудуйте 3D-модель.'); return; }
-    const miss = Object.entries({ dims: 'габарити', parts: 'розміри частин', orient: 'орієнтація', scale: 'масштаб', shell: 'відкритість оболонки', holes: 'отвори', supports: 'точки опирання', cant: 'виноси', unknown: 'невідомі ділянки' }).filter(([k]) => !pr.vision.checklist[k]).map(([, l]) => l);
-    if (miss.length) { c.toast('Не підтверджено: ' + miss.join(', ') + '. Позначте пункти чек-листа.'); return; }
-    const old = pr.parts.slice();
-    const H = Math.max(...vb.parts.map(p => p.z2));
-    pr.parts = vb.parts.map(p => {
-      const prev = old.find(q => q.name === p.name) || {};
-      const nearAxis = Math.abs(p.c[0]) < 0.25 * H && Math.abs(p.c[1]) < 0.25 * H;
-      const kind = p.kind && p.kind !== 'auto' ? p.kind : (nearAxis && p.H > 0.3 * H ? 'dist' : 'cant');
-      return {
-        name: p.name, kind, shape: p.shape, x: +p.c[0].toFixed(3), y: +p.c[1].toFixed(3), z: +p.c[2].toFixed(3), z1: +Math.max(0.05, p.z1).toFixed(2), z2: +p.z2.toFixed(2),
-        shellArea: +p.area.toFixed(3), tShell: prev.tShell || 2, rhoShell: prev.rhoShell || 7850, extraMass: prev.extraMass || 0,
-        Ax: +p.Ax.toFixed(3), Ay: +p.Ay.toFixed(3), Ah: +p.Ah.toFixed(3), areaTable: p.areaTable.map(a => +a.toFixed(4)),
-        Cf: prev.Cf || (p.shape === 'sheet' ? 1.8 : 1.2), CfConfirmed: !!prev.CfConfirmed, mu: prev.mu || 1, sec: prev.sec || '□80×5',
-        source: 'image', status: p.assumed ? 'assumed' : 'confirmed',
-      };
-    });
-    if (pr.vision.analysis) applyFrame(c, pr);
-    else {
-      // рівні ядра під висоту тулуба: верх ядра — верх «розподілених» частин, крок ≈ 1,5 м
-      const dist = pr.parts.filter(p => p.kind === 'dist');
-      const zTop = dist.length ? Math.max(...dist.map(p => p.z2)) : Math.max(...pr.parts.map(p => p.z));
-      const n = Math.max(2, Math.round(zTop / 1.5));
-      const oldLv = pr.frame.levels.join('; ');
-      pr.frame.levels = Array.from({ length: n + 1 }, (_, i) => +(zTop * i / n).toFixed(2));
-      c.logChange('рівні ядра', oldLv, pr.frame.levels.join('; '));
-      c.toast(`Рівні ядра підігнано під скульптуру: ${pr.frame.levels.join('; ')} м. Перевірте в розділі «Каркас».`);
-    }
-    c.changed('частини', `${old.length} шт.`, `${pr.parts.length} шт. із зображень`);
+    const pr = proj(), names = pr.vision.parts.map(p => p.name).filter(Boolean);
+    if (!names.length) { c.toast('Спочатку позначте частини на зображенні.'); return; }
+    const old = pr.parts.slice(), added = [];
+    pr.parts = pr.vision.parts.map(vp => {
+      const prev = old.find(q => q.name === vp.name);
+      if (prev) { if (vp.kind && vp.kind !== 'auto' && vp.kind !== prev.kind && prev.kind !== 'train') prev.kind = vp.kind; return prev; }
+      added.push(vp.name);
+      const kind = vp.kind && vp.kind !== 'auto' ? vp.kind : /шлейф|манті|трен/i.test(vp.name) ? 'train' : /тулуб|плащ|корпус|постать/i.test(vp.name) ? 'dist' : 'cant';
+      if (kind === 'train') return Object.assign({ name: vp.name, kind, shape: vp.shape || 'volume', path: [], shellArea: 0, tShell: 2, rhoShell: 7850, extraMass: 0, Ax: 0, Ay: 0, Ah: 0, Cf: 1.2, mu: 1, sec: '', source: 'sketch', status: 'needs3d' }, JSON.parse(JSON.stringify(SC.model.trainDefaults)));
+      return { name: vp.name, kind, shape: vp.shape || 'volume', x: 0, y: 0, z: 0, z1: 0, z2: 0, shellArea: 0, tShell: 2, rhoShell: 7850, extraMass: 0, Ax: 0, Ay: 0, Ah: 0, Cf: vp.shape === 'sheet' ? 1.8 : 1.2, mu: 1, sec: '□80×5', source: 'sketch', status: 'needs3d' };
+    }).concat(old.filter(q => !pr.vision.parts.some(vp => vp.name === q.name)));
+    c.changed('частини', `${old.length} шт.`, `${pr.parts.length} шт. (поділ з ескізу)`);
+    c.toast(added.length ? `Поділ перенесено. Нові частини без розмірів: ${added.join(', ')} — імпортуйте для них 3D (STL/OBJ) або введіть розміри з креслення.` : 'Поділ перенесено; розміри частин не змінювались.');
     c.go('parts');
   }
+
+  /** Перевірка узгодженості видів: однакові габарити на різних ракурсах (висота — фронт/бік; ширина X — фронт/верх; глибина Y — бік/верх). */
+  V.viewConsistency = function (pr, tol) {
+    tol = tol || 0.05;
+    const views = pr.images.flatMap(im => im.views.map(v => ({ im, v })));
+    const box = ({ v }) => {
+      const sc = viewScale(v); if (!isFinite(sc.scale)) return null;
+      const m = getMask(v), w = v.crop[2], h = v.crop[3];
+      let u0 = w, u1 = -1, v0 = h, v1 = -1;
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (m[y * w + x] > 0) { if (x < u0) u0 = x; if (x > u1) u1 = x; if (y < v0) v0 = y; if (y > v1) v1 = y; }
+      if (u1 < 0) return null;
+      return { name: v.name, orient: v.orient, W: (u1 - u0 + 1) * sc.scale, H: (v1 - v0 + 1) * sc.scale };
+    };
+    const B = views.map(box).filter(Boolean), by = o => B.find(b => b.orient === o);
+    const fr = by('front') || by('back'), sd = by('side'), tp = by('top'), out = [];
+    const cmp = (what, a, av, b, bv) => { if (!a || !b) return; const d = Math.abs(av - bv) / Math.max(av, bv); out.push({ what, a: a.name, av, b: b.name, bv, d, ok: d <= tol }); };
+    cmp('Висота', fr, fr && fr.H, sd, sd && sd.H);
+    cmp('Ширина (X)', fr, fr && fr.W, tp, tp && tp.W);
+    cmp('Глибина (Y)', sd, sd && sd.W, tp, tp && tp.H);
+    return { rows: out, tol, enough: !!(fr && (sd || tp)) };
+  };
 })(window.SC = window.SC || {});

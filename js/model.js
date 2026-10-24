@@ -1,7 +1,9 @@
 /* Побудова розрахункової моделі каркаса скульптури з параметрів проєкту.
  * Каркас-ядро: одна стійка або просторове ядро з 3/4 стійок, рівні з поясами, зв'язки.
  * Частини скульптури: «розподілена» (тулуб, плащ — передає навантаження на ядро по висоті)
- * або «консольна» (голова, руки, книга — на виносній трубі від найближчого вузла ядра).
+ * або «консольна» (голова, руки, книга — на виносній трубі від найближчого вузла ядра),
+ * або «шлейф» (лежача частина, напр. мантія до землі) — просторова тригранна ферма вздовж гребеня
+ * з поперечними рамами, власними опорами-стійками з анкерами; секції Ш1, Ш2… — прольоти між опорами.
  */
 (function (SC) {
   'use strict';
@@ -60,11 +62,13 @@
           { name: 'Пісок середньої крупності', h: 8, gamma: 18.5, E: 30, nu: 0.3, phi: 35, c: 1 },
         ],
         gwl: 4.5, sLim: 0.2, tiltLim: 0.004, limRow: 'rigid', surcharge: 10, soilType: 'clay', gammaGphi: 1.1, gammaGc: 1.5, existing: false,
+        trainMode: 'pads', cx: 0, cy: 0, dsLim: 0.004, pad: { B: 1.2, L: 1.2, h: 0.4, depth: 1.0, pedH: 0.5, margin: 0.3 },
       },
-      design: { bMin: 40, bMax: 200, lockPost: false, electrode: 'Е42 / Э42 (ручне)', weldLegFrame: 'auto', weldLegBrace: 'auto', meshUnit: '0.001', meshUp: 'z', target: 0.9, tMin: 3, dirStep: 15, second: true, method: 'A', defLimit: 150, norm: 'both', gammaM0: 1.0, gammaM1: 1.0, curve: 'c', waste: 7, sheetWaste: 15 },
+      design: { bMin: 40, bMax: 200, lockPost: false, electrode: 'Е42 / Э42 (ручне)', weldLegFrame: 'auto', weldLegBrace: 'auto', meshUnit: '0.001', meshUp: 'z', target: 0.9, tMin: 3, dirStep: 15, second: true, method: 'A', defLimit: 150, norm: 'both', gammaM0: 1.0, gammaM1: 1.0, curve: 'c', waste: 7, sheetWaste: 15, sliceStep: 0.5, coreClr: 80, beltStep: 1.5, sheetW: 1.25, sheetH: 2.5, sheetT: 2 },
       prices: { tube: 62, sheet: 58, plate: 55, anchor: 180, concrete: 3900, rebar: 38, fabrication: 0, transport: 0, install: 0 },
       overrides: {},
       mesh: [],
+      slices: null, segments: null,
       images: [],
       vision: { parts: [], depthRatio: 0.6, yCenter: 0, checklist: {} },
       status: { value: 'Чернетка', log: [] },
@@ -146,6 +150,10 @@
     const partAttach = [];
     (pr.parts || []).forEach((p, pi) => {
       const mass = (p.shellArea || 0) * (p.tShell || 0) / 1000 * (p.rhoShell || 7850) + (p.extraMass || 0);
+      if (p.kind === 'train') {
+        partAttach.push(buildTrain(p, pi, { nodes, nodeById, levelNodes, add, sec, fr, mass }));
+        return;
+      }
       if (p.kind === 'cant') {
         // найближчий рівень ядра (за висотою), потім найближчий вузол цього рівня
         let best = null, bd = Infinity;
@@ -171,24 +179,151 @@
         const zs = lv.map(L => L.z);
         const targets = [];
         let tot = 0;
+        // профіль по висоті з перерізів 3D-моделі (маса й навітряна площа смуг) — інакше рівномірно в межах z₁…z₂
+        const prof = Array.isArray(p.zProfile) && p.zProfile.length ? p.zProfile : null;
+        const cut = (lo, hi, key) => prof.reduce((acc, b) => { const a = Math.max(lo, b.z0), e = Math.min(hi, b.z1); return e > a ? acc + (b[key] || 0) * (e - a) / Math.max(1e-9, b.z1 - b.z0) : acc; }, 0);
+        let totW = 0;
         lv.forEach((L, k) => {
           const lo = k === 0 ? 0 : (zs[k - 1] + zs[k]) / 2;
           const hi = k === lv.length - 1 ? Infinity : (zs[k] + zs[k + 1]) / 2;
+          if (prof) {
+            const m = cut(lo, hi, 'm'), w = cut(lo, hi, 'aw');
+            if (m > 0 || w > 0) { const hh = Math.min(hi, prof[prof.length - 1].z1); targets.push({ share: m, shareW: w, z: (Math.max(lo, prof[0].z0) + hh) / 2, nodes: L.ids, c: [p.x, p.y, L.z] }); tot += m; totW += w; }
+            return;
+          }
           const a = Math.max(lo, z1), b = Math.min(hi, z2);
           if (b > a) { targets.push({ share: b - a, z: (a + b) / 2, nodes: L.ids, c: [p.x, p.y, L.z] }); tot += b - a; }
         });
+        if (prof && totW > 0) targets.forEach(t => { t.shareW /= totW; });
         if (!targets.length) { const L = lv.reduce((m, L) => Math.abs(L.z - p.z) < Math.abs(m.z - p.z) ? L : m, lv[0]); targets.push({ share: 1, z: p.z, nodes: L.ids, c: [p.x, p.y, L.z] }); tot = 1; }
-        targets.forEach(t => { t.share /= tot; });
-        partAttach.push({ part: pi, mass, targets });
+        targets.forEach(t => { t.share /= tot || 1; });
+        partAttach.push({ part: pi, mass, targets, profiled: !!prof });
       }
     });
     const sections = M.markSections({ nodes, elems, levels, levelNodes, posts, pr });
     return { nodes, elems, groups, levels, levelNodes, H, posts, partAttach, steel, sections };
   };
 
+
+  /** Параметри шлейфу за замовчуванням (усі розміри — м). path — точки гребеня від кріплення до ядра до кінця на землі. */
+  M.trainDefaults = { w: 0.8, wEnd: 1.4, h: 0.6, hEnd: 0.3, panel: 1.0, supports: [0.5, 1.0], supType: 'auto', secChord: '□80×4', secWeb: '□50×3', secPost: '□80×4', clear: 0.1 };
+  /** Груп стрижнів шлейфу (для підбору перерізів і таблиць). */
+  M.trainGroups = name => ({ chord: `Шлейф «${name}»: пояси`, web: `Шлейф «${name}»: решітка і рами`, post: `Шлейф «${name}»: стійки опор` });
+
+  /** Точки гребеня шлейфу, рівномірно за довжиною: [{t, s, p:[x,y,z], tan}] і довжина L. */
+  M.trainStations = function (p) {
+    const d = Object.assign({}, M.trainDefaults, p);
+    const pts = (p.path || []).filter(q => q && q.length === 3 && q.every(isFinite));
+    if (pts.length < 2) return null;
+    const seg = []; let L = 0;
+    for (let i = 0; i < pts.length - 1; i++) { const l = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1], pts[i + 1][2] - pts[i][2]); seg.push(l); L += l; }
+    if (L < 0.1) return null;
+    const n = Math.max(2, Math.ceil(L / Math.max(0.3, d.panel)));
+    const at = s => {
+      let acc = 0;
+      for (let i = 0; i < seg.length; i++) {
+        if (s <= acc + seg[i] + 1e-12 || i === seg.length - 1) {
+          const u = seg[i] > 0 ? Math.min(1, Math.max(0, (s - acc) / seg[i])) : 0;
+          const a = pts[i], b = pts[i + 1];
+          return { p: [0, 1, 2].map(k => lerp(a[k], b[k], u)), tan: [0, 1, 2].map(k => (b[k] - a[k]) / (seg[i] || 1)) };
+        }
+        acc += seg[i];
+      }
+    };
+    const st = [];
+    for (let i = 0; i <= n; i++) { const s = L * i / n, q = at(s); st.push({ i, t: i / n, s, p: q.p, tan: q.tan }); }
+    return { st, L, n, d };
+  };
+
+  /** Габарит і центр шлейфу для таблиць і навантажень (x, y, z — центр за довжиною гребеня; z1…z2 — висоти). */
+  M.trainSummary = function (p) {
+    const g = M.trainStations(p); if (!g) return null;
+    const c = [0, 1, 2].map(k => g.st.reduce((a, q) => a + q.p[k], 0) / g.st.length);
+    const zs = g.st.map(q => q.p[2]);
+    return { L: g.L, n: g.n, c, z1: Math.min(...zs), z2: Math.max(...zs), d: g.d };
+  };
+
+  /** Центр і висоти шлейфів — до розрахунку (потрібні оболонці, вітру, ожеледі ще до побудови моделі). */
+  M.normalizeParts = function (pr) {
+    (pr.parts || []).forEach(p => {
+      if (p.kind !== 'train') return;
+      const sm = M.trainSummary(p);
+      if (sm) Object.assign(p, { x: +sm.c[0].toFixed(3), y: +sm.c[1].toFixed(3), z: +sm.c[2].toFixed(3), z1: +sm.z1.toFixed(2), z2: +sm.z2.toFixed(2) });
+    });
+  };
+
+  function buildTrain(p, pi, ctx) {
+    const { nodes, nodeById, levelNodes, add, sec, fr, mass } = ctx;
+    const g = M.trainStations(p);
+    if (!g) return { part: pi, mass, targets: [], train: true, error: 'не задано гребінь (мінімум 2 точки)' };
+    const d = g.d, G = M.trainGroups(p.name);
+    const sm = M.trainSummary(p);
+    Object.assign(p, { x: +sm.c[0].toFixed(3), y: +sm.c[1].toFixed(3), z: +sm.c[2].toFixed(3), z1: +sm.z1.toFixed(2), z2: +sm.z2.toFixed(2) });
+    const sCh = sec(d.secChord), sW = sec(d.secWeb), sP = sec(d.secPost);
+    const supIdx = [...new Set((d.supports || []).map(f => Math.max(1, Math.min(g.n, Math.round(f * g.n)))))].sort((a, b) => a - b);
+    const segOf = i => supIdx.filter(k => k < i).length; // проліт (секція) станції / стрижня
+    const coreNodes = levelNodes.filter(L => L.z > 0).flatMap(L => L.ids).map(id => nodeById.get(id));
+    const nearCore = q => coreNodes.reduce((m, n) => { const dd = Math.hypot(n.x - q[0], n.y - q[1], n.z - q[2]); return dd < m.d ? { n, d: dd } : m; }, { n: null, d: Infinity });
+    const mk = (id, q, extra) => { const nd = Object.assign({ id, x: +q[0].toFixed(4), y: +q[1].toFixed(4), z: +q[2].toFixed(4), sup: null, train: pi }, extra || {}); nodes.push(nd); nodeById.set(id, nd); return nd; };
+    const pre = `T${pi + 1}`;
+    const ids = []; // [ridge, left, right] для кожної станції
+    g.st.forEach(q => {
+      const t = q.t, w = lerp(d.w, d.wEnd != null ? d.wEnd : d.w, t), h = lerp(d.h, d.hEnd != null ? d.hEnd : d.h, t);
+      let nx = q.tan[1], ny = -q.tan[0]; const nl = Math.hypot(nx, ny);
+      if (nl < 1e-6) { nx = 0; ny = 1; } else { nx /= nl; ny /= nl; }
+      const zr = Math.max(q.p[2], d.clear + 0.1), zl = Math.max(d.clear, zr - h);
+      const Rp = [q.p[0], q.p[1], zr], Lp = [q.p[0] + nx * w / 2, q.p[1] + ny * w / 2, zl], Rt = [q.p[0] - nx * w / 2, q.p[1] - ny * w / 2, zl];
+      const trio = [Rp, Lp, Rt].map((pt, k) => {
+        if (q.i === 0) { const nc = nearCore(pt); if (nc.n && nc.d < 0.05) return nc.n.id; }
+        return mk(`${pre}S${q.i}${'XLR'[k]}`, pt, { tst: q.i }).id;
+      });
+      ids.push(trio);
+    });
+    const E = (i, j, s0, type, role, seg, secName) => { if (i === j) return; add(i, j, s0, type, role === 'post' ? G.post : (role === 'tchord' || role === 'tlink') ? G.chord : G.web, { secName, train: pi, trole: role, tseg: seg }); };
+    // кріплення першої рами до ядра
+    ids[0].forEach(id => {
+      const n = nodeById.get(id); if (n.train == null) return;
+      const nc = nearCore([n.x, n.y, n.z]);
+      if (nc.n) E(nc.n.id, id, sCh, 'beam', 'tlink', 0, d.secChord);
+    });
+    for (let i = 0; i < ids.length; i++) {
+      const [a, b, c] = ids[i], sg = segOf(i);
+      // поперечна рама (трикутник)
+      E(a, b, sW, 'beam', 'tframe', sg, d.secWeb); E(a, c, sW, 'beam', 'tframe', sg, d.secWeb); E(b, c, sW, 'beam', 'tframe', sg, d.secWeb);
+      if (i < ids.length - 1) {
+        const [a2, b2, c2] = ids[i + 1], sg2 = supIdx.filter(k => k <= i).length;
+        for (const [u, v] of [[a, a2], [b, b2], [c, c2]]) E(u, v, sCh, 'beam', 'tchord', sg2, d.secChord);
+        // розкоси на трьох гранях
+        for (const [u, v] of [[a, b2], [a, c2], [b, c2]]) E(u, v, sW, 'truss', 'brace', sg2, d.secWeb);
+      }
+      if (supIdx.includes(i)) {
+        // опора: стійки від нижніх поясів до землі. Тип: auto — проміжні шарнірні, крайня рухома вздовж шлейфу
+        // (температурне видовження ферми не защемлюється між ядром і кінцевою опорою); fixed / pinned — як задано.
+        const last = i === supIdx[supIdx.length - 1];
+        const tanq = g.st[i].tan, axX = Math.abs(tanq[0]) >= Math.abs(tanq[1]);
+        const type = d.supType === 'fixed' ? 'fixed' : d.supType === 'pinned' ? 'pinned' : (last && supIdx.length >= 1 ? 'slide' : 'pinned');
+        const supV = type === 'fixed' ? [1, 1, 1, 1, 1, 1] : type === 'pinned' ? [1, 1, 1, 0, 0, 0] : (axX ? [0, 1, 1, 0, 0, 0] : [1, 0, 1, 0, 0, 0]);
+        for (const id of [b, c]) {
+          const n = nodeById.get(id);
+          const gnd = mk(`${pre}G${i}${id.slice(-1)}`, [n.x, n.y, 0], { sup: supV, tsupport: i, supType: type, slideAxis: type === 'slide' ? (axX ? 'x' : 'y') : null });
+          E(gnd.id, id, sP, 'beam', 'post', sg, d.secPost);
+        }
+      }
+    }
+    // навантаження частини — на станції пропорційно довжині ділянки гребеня
+    const Ls = g.st.map((q, i) => ((i > 0 ? q.s - g.st[i - 1].s : 0) + (i < g.n ? g.st[i + 1].s - q.s : 0)) / 2);
+    const tot = Ls.reduce((a, b) => a + b, 0) || 1;
+    const targets = ids.map((trio, i) => {
+      const P3 = trio.map(id => nodeById.get(id));
+      const c = [0, 1, 2].map(k => P3.reduce((a, n) => a + [n.x, n.y, n.z][k], 0) / 3);
+      return { share: Ls[i] / tot, z: P3[0].z, nodes: trio, c };
+    }).filter(t => t.share > 0);
+    return { part: pi, mass, targets, train: true, supIdx, L: g.L };
+  }
+
   /** Палітра секцій: розрізнювані кольори, читаються на світлому й темному фоні. */
   M.sectColors = ['#2b6cb0', '#c05621', '#2f855a', '#9b2c9b', '#b7791f', '#0f8a8a', '#c53030', '#5a67d8', '#718096', '#d53f8c', '#38a169', '#805ad5'];
-  const ROLE = { post: ['С', 'стійка'], brace: ['Р', 'розкіс / зв\'язок'], ring: ['П', 'пояс'], cant: ['К', 'консоль'], extra: ['Д', 'додатковий'] };
+  const ROLE = { post: ['С', 'стійка'], brace: ['Р', 'розкіс / зв\'язок'], ring: ['П', 'пояс'], cant: ['К', 'консоль'], extra: ['Д', 'додатковий'], tchord: ['Х', 'пояс / хребет шлейфу'], tframe: ['Т', 'поперечна рама шлейфу'], tlink: ['З', 'кріплення до ядра'] };
   M.roleName = r => (ROLE[r] || ['?', r])[1];
 
   /**
@@ -217,11 +352,18 @@
       if (hi === lo) return tiers[Math.max(0, hi - 1)] || null; // пояс належить ярусу під ним
       return tiers[lo] || null;
     };
-    let nCant = 0, extraS = null;
-    const cantS = new Map();
+    let nCant = 0, extraS = null, nTrain = 0;
+    const cantS = new Map(), trainS = new Map();
     elems.forEach(e => {
       let s, role;
-      if (e.cantilever) {
+      if (e.train != null) {
+        const key = e.train + ':' + e.tseg;
+        if (!trainS.has(key)) {
+          nTrain++; const p = (pr.parts || [])[e.train] || {};
+          trainS.set(key, sect(`Ш${nTrain}`, 'train', `Шлейф «${p.name || 'частина ' + (e.train + 1)}», проліт ${e.tseg + 1}`, { part: e.train, span: e.tseg }));
+        }
+        s = trainS.get(key); role = e.trole;
+      } else if (e.cantilever) {
         if (!cantS.has(e.part)) { nCant++; const p = (pr.parts || [])[e.part] || {}; cantS.set(e.part, sect(`К${nCant}`, 'cant', `Консоль «${p.name || 'частина ' + (e.part + 1)}»`, { part: e.part })); }
         s = cantS.get(e.part); role = 'cant';
       } else if (e.group === 'Стійки ядра' || e.group === "Зв'язки" || e.group === 'Пояси (кільця)') {
