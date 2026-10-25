@@ -19,3 +19,10 @@ jobs:
           if (bad.length) { console.log(JSON.stringify(bad, null, 1)); process.exit(1); }"
       - name: Build single-file app
         run: python3 build.py
+      - name: SketchUp extension — Ruby tests
+        run: |
+          ruby -c sketchup/src/sculpture_frame.rb sketchup/src/sculpture_frame/main.rb sketchup/src/sculpture_frame/geom_util.rb
+          ruby sketchup/test/geom_util_test.rb
+          ruby sketchup/test/main_test.rb
+      - name: SketchUp extension — build .rbz
+        run: pip install pillow && python3 sketchup/build_rbz.py

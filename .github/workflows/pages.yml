@@ -23,6 +23,8 @@ jobs:
           node-version: 20
       - name: Тести розрахункового ядра
         run: for t in tests/*.test.js; do node "$t"; done
+      - name: Розширення SketchUp (.rbz) для завантаження з сайту
+        run: pip install pillow && python3 sketchup/build_rbz.py && rm -rf sketchup/build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
